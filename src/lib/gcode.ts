@@ -119,9 +119,7 @@ function replaceCoordinate(line: string, letter: "X" | "Y", value: number) {
     : `${line.trimEnd()} ${replacement}`;
 }
 
-export type GCodeEditMode = "translate" | "resize";
-
-export function offsetSelectedGCode(source: string, result: GCodeResult, selectedPathIndices: number[], offset: Point, mode: GCodeEditMode = "translate") {
+export function offsetSelectedGCode(source: string, result: GCodeResult, selectedPathIndices: number[], offset: Point) {
   if (!selectedPathIndices.length || (!offset.x && !offset.y)) return source;
   const selected = new Set(selectedPathIndices);
   const displacements = new Map<string, Point>();
@@ -130,7 +128,7 @@ export function offsetSelectedGCode(source: string, result: GCodeResult, selecte
   selected.forEach((index) => {
     const path = result.paths[index];
     if (!path || path.rapid) return;
-    if (mode === "translate") mark(path.points[0]);
+    mark(path.points[0]);
     mark(path.points[path.points.length - 1]);
   });
 

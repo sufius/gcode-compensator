@@ -17,7 +17,7 @@ import { FileDropzone } from "@/components/FileDropzone";
 import { ToolpathViewer } from "@/components/ToolpathViewer";
 import { OffsetControls, OffsetDirection } from "@/components/OffsetControls";
 import { parseDxf, DxfResult } from "@/lib/dxf";
-import { offsetSelectedGCode, parseGCode, GCodeEditMode, GCodeResult } from "@/lib/gcode";
+import { offsetSelectedGCode, parseGCode, GCodeResult } from "@/lib/gcode";
 import { Point, transformPaths, transformPoint } from "@/lib/geometry";
 import type { LoadedProject, ProjectSummary, ProjectVersion, SaveProjectRequest } from "@/lib/project";
 
@@ -229,7 +229,7 @@ function HomeContent() {
     setSaveState("saved");
   }
 
-  async function commitOffset(mode: GCodeEditMode, direction: OffsetDirection, rawValue: number) {
+  async function commitOffset(direction: OffsetDirection, rawValue: number) {
     if (!gcode || !selectedPathIndices.length) return false;
     if (!activeProject) {
       setError("Bitte das Projekt zuerst speichern, bevor eine neue G-Code-Version angelegt wird.");
@@ -241,7 +241,7 @@ function HomeContent() {
       x: direction === "left" ? -amount : direction === "right" ? amount : 0,
       y: direction === "down" ? -amount : direction === "up" ? amount : 0,
     };
-    const content = offsetSelectedGCode(gcode.content, gcode.data, selectedPathIndices, offset, mode);
+    const content = offsetSelectedGCode(gcode.content, gcode.data, selectedPathIndices, offset);
     versionOperationRef.current = true;
     setVersionBusy(true);
     try {
@@ -251,7 +251,7 @@ function HomeContent() {
         body: JSON.stringify({
           gcode: { name: gcode.name, content },
           dxfTransform: { rotationDegrees: rotation, origin },
-          label: `${mode === "translate" ? "Verschoben" : "Länge geändert"}: ${offset.x ? "X" : "Y"} ${(offset.x || offset.y).toLocaleString("de-DE")} mm`,
+          label: `Verschoben: ${offset.x ? "X" : "Y"} ${(offset.x || offset.y).toLocaleString("de-DE")} mm`,
         }),
       });
       const project = await response.json() as LoadedProject & { error?: string };
@@ -381,22 +381,14 @@ function HomeContent() {
           {error ? <Alert severity="error" onClose={() => setError(null)}>{error}</Alert> : null}
 
           <Stack direction={{ xs: "column", lg: "row" }} spacing={2} sx={{ alignItems: "stretch" }}>
-            <Box sx={{ flex: 1, display: "grid", gridTemplateColumns: { xs: "1fr", xl: "repeat(2, minmax(0, 1fr))" }, gap: 2 }}>
+            <Box sx={{ flex: 1 }}>
               <OffsetControls
                 title="Verschieben"
                 description="Bewegt Start und Ende der ausgewählten Bewegung gemeinsam."
                 enabled={selectedPathIndices.length > 0}
                 selectedCount={selectedPathIndices.length}
                 busy={versionBusy}
-                onCommit={(direction, value) => commitOffset("translate", direction, value)}
-              />
-              <OffsetControls
-                title="Verlängern / verkürzen"
-                description="Verschiebt nur den Endpunkt der ausgewählten Bewegung."
-                enabled={selectedPathIndices.length > 0}
-                selectedCount={selectedPathIndices.length}
-                busy={versionBusy}
-                onCommit={(direction, value) => commitOffset("resize", direction, value)}
+                onCommit={commitOffset}
               />
             </Box>
             <Paper variant="outlined" sx={{ p: 2.5, minWidth: { lg: 280 } }}>

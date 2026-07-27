@@ -24,7 +24,7 @@
     "showGrid": true,
     "showRapidMoves": true
   },
-  "updatedAt": "2026-07-27T18:36:40.357Z",
+  "updatedAt": "2026-07-27T18:44:23.168Z",
   "versions": [
     {
       "id": "v1",
@@ -53,35 +53,7 @@
           "y": 2.365
         }
       }
-    },
-    {
-      "id": "v3",
-      "createdAt": "2026-07-27T18:21:34.013Z",
-      "label": "Länge geändert: Y 0,4 mm",
-      "gcodePath": "versions/v3/toolpath.gcode",
-      "gcodeSha256": "fd8601f37092bf563cfd9e893fb246602eaa96e81bd03fe0cb23c35d039071eb",
-      "dxfTransform": {
-        "rotationDegrees": 90,
-        "origin": {
-          "x": -244.365,
-          "y": 2.365
-        }
-      }
-    },
-    {
-      "id": "v4",
-      "createdAt": "2026-07-27T18:36:39.486Z",
-      "label": "Länge geändert: Y 0,4 mm",
-      "gcodePath": "versions/v4/toolpath.gcode",
-      "gcodeSha256": "238d8a7dacb4df564116b7b594f49d5f48f534290257282192ecb212321ac624",
-      "dxfTransform": {
-        "rotationDegrees": 90,
-        "origin": {
-          "x": -244.365,
-          "y": 2.365
-        }
-      }
     }
   ],
-  "currentVersion": "v4"
+  "currentVersion": "v2"
 }

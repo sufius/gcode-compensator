@@ -21,6 +21,19 @@ import type { LoadedProject, ProjectSummary, SaveProjectRequest } from "@/lib/pr
 
 type Loaded<T> = { name: string; content: string; data: T };
 type SaveState = "idle" | "dirty" | "saving" | "saved";
+const LAST_PROJECT_KEY = "gcode-compensator:last-project";
+
+function rememberProject(slug: string) {
+  try { window.localStorage.setItem(LAST_PROJECT_KEY, slug); } catch { /* Storage kann im privaten Modus gesperrt sein. */ }
+}
+
+function forgetProject() {
+  try { window.localStorage.removeItem(LAST_PROJECT_KEY); } catch { /* Storage kann im privaten Modus gesperrt sein. */ }
+}
+
+function rememberedProject() {
+  try { return window.localStorage.getItem(LAST_PROJECT_KEY); } catch { return null; }
+}
 
 export default function Home() {
   const hydrated = useSyncExternalStore(subscribeToHydration, getClientSnapshot, getServerSnapshot);
@@ -115,7 +128,7 @@ function HomeContent() {
     if (activeProject) setSaveState("dirty");
   }
 
-  async function openProject(slug: string) {
+  const openProject = useCallback(async (slug: string) => {
     try {
       const response = await fetch(`/api/projects/${encodeURIComponent(slug)}`, { cache: "no-store" });
       const project = await response.json() as LoadedProject & { error?: string };
@@ -133,12 +146,21 @@ function HomeContent() {
       setProjectName(project.manifest.name);
       setSelectingOrigin(false);
       setActiveProject(project.slug);
+      rememberProject(project.slug);
       setSaveState("saved");
       setError(null);
     } catch (reason) {
+      forgetProject();
       setError(reason instanceof Error ? reason.message : "Projekt konnte nicht geöffnet werden.");
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    const slug = rememberedProject();
+    if (!slug) return;
+    const timer = window.setTimeout(() => void openProject(slug), 0);
+    return () => window.clearTimeout(timer);
+  }, [openProject]);
 
   async function saveCurrentProject() {
     if (!projectName.trim()) {
@@ -163,6 +185,7 @@ function HomeContent() {
       const result = await response.json() as { slug?: string; error?: string };
       if (!response.ok || !result.slug) throw new Error(result.error ?? "Projekt konnte nicht gespeichert werden.");
       setActiveProject(result.slug);
+      rememberProject(result.slug);
       setSaveState("saved");
       setError(null);
       await refreshProjects();
@@ -175,6 +198,7 @@ function HomeContent() {
   function newProject() {
     clearView();
     setActiveProject(null);
+    forgetProject();
     setProjectName("");
     setSaveState("idle");
   }

@@ -1,12 +1,18 @@
 "use client";
 
-import { useMemo } from "react";
-import { Box, Stack, Typography } from "@mui/material";
+import { useEffect, useMemo, useRef, useState } from "react";
+import AddRounded from "@mui/icons-material/AddRounded";
+import RemoveRounded from "@mui/icons-material/RemoveRounded";
+import { Box, IconButton, Stack, Typography } from "@mui/material";
 import { Bounds, combineBounds, getBounds, Path, Point } from "@/lib/geometry";
 
 const WIDTH = 1000;
 const HEIGHT = 620;
 const PADDING = 62;
+const MIN_ZOOM = 0.25;
+const MAX_ZOOM = 16;
+
+type Viewport = { zoom: number; panX: number; panY: number };
 
 function niceStep(range: number) {
   const rough = Math.max(range, 1e-6) / 8;
@@ -55,6 +61,11 @@ type ViewerProps = {
 };
 
 export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], selectingOrigin = false, onSelectOrigin }: ViewerProps) {
+  const svgRef = useRef<SVGSVGElement>(null);
+  const dragRef = useRef<Point | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const [viewport, setViewport] = useState<Viewport>({ zoom: 1, panX: 0, panY: 0 });
+
   const scene = useMemo(() => {
     const bounds = paddedBounds(combineBounds(getBounds(dxfPaths), getBounds(gcodePaths)));
     const dataWidth = Math.max(bounds.maxX - bounds.minX, 1);
@@ -64,16 +75,119 @@ export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], sel
     const drawingHeight = dataHeight * scale;
     const offsetX = (WIDTH - drawingWidth) / 2;
     const offsetY = (HEIGHT - drawingHeight) / 2;
-    const project = (x: number, y: number): [number, number] => [offsetX + (x - bounds.minX) * scale, HEIGHT - offsetY - (y - bounds.minY) * scale];
-    const step = niceStep(Math.max(dataWidth, dataHeight));
-    return { bounds, project, xTicks: ticks(bounds.minX, bounds.maxX, step), yTicks: ticks(bounds.minY, bounds.maxY, step), step };
-  }, [dxfPaths, gcodePaths]);
+    const centerX = WIDTH / 2;
+    const centerY = HEIGHT / 2;
+    const project = (x: number, y: number): [number, number] => {
+      const baseX = offsetX + (x - bounds.minX) * scale;
+      const baseY = HEIGHT - offsetY - (y - bounds.minY) * scale;
+      return [centerX + (baseX - centerX) * viewport.zoom + viewport.panX, centerY + (baseY - centerY) * viewport.zoom + viewport.panY];
+    };
+    const unproject = (screenX: number, screenY: number): Point => {
+      const baseX = centerX + (screenX - centerX - viewport.panX) / viewport.zoom;
+      const baseY = centerY + (screenY - centerY - viewport.panY) / viewport.zoom;
+      return { x: bounds.minX + (baseX - offsetX) / scale, y: bounds.minY + (HEIGHT - offsetY - baseY) / scale };
+    };
+    const topLeft = unproject(0, 0);
+    const bottomRight = unproject(WIDTH, HEIGHT);
+    const visible = {
+      minX: Math.min(topLeft.x, bottomRight.x),
+      maxX: Math.max(topLeft.x, bottomRight.x),
+      minY: Math.min(topLeft.y, bottomRight.y),
+      maxY: Math.max(topLeft.y, bottomRight.y),
+    };
+    const step = niceStep(Math.max(visible.maxX - visible.minX, visible.maxY - visible.minY));
+    return { project, xTicks: ticks(visible.minX, visible.maxX, step), yTicks: ticks(visible.minY, visible.maxY, step), step };
+  }, [dxfPaths, gcodePaths, viewport]);
+
+  function svgPoint(clientX: number, clientY: number): Point {
+    const svg = svgRef.current;
+    if (!svg) return { x: WIDTH / 2, y: HEIGHT / 2 };
+    const point = svg.createSVGPoint();
+    point.x = clientX;
+    point.y = clientY;
+    const matrix = svg.getScreenCTM();
+    if (!matrix) return { x: WIDTH / 2, y: HEIGHT / 2 };
+    const transformed = point.matrixTransform(matrix.inverse());
+    return { x: transformed.x, y: transformed.y };
+  }
+
+  function zoomAt(point: Point, factor: number) {
+    setViewport((current) => {
+      const zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, current.zoom * factor));
+      const ratio = zoom / current.zoom;
+      return {
+        zoom,
+        panX: point.x - WIDTH / 2 - (point.x - WIDTH / 2 - current.panX) * ratio,
+        panY: point.y - HEIGHT / 2 - (point.y - HEIGHT / 2 - current.panY) * ratio,
+      };
+    });
+  }
+
+  useEffect(() => {
+    if (!dragging) return;
+
+    const handleMouseMove = (event: MouseEvent) => {
+      const previous = dragRef.current;
+      if (!previous || (event.buttons & 2) === 0) {
+        dragRef.current = null;
+        setDragging(false);
+        return;
+      }
+      event.preventDefault();
+      const previousSvg = svgPoint(previous.x, previous.y);
+      const currentSvg = svgPoint(event.clientX, event.clientY);
+      setViewport((current) => ({
+        ...current,
+        panX: current.panX + currentSvg.x - previousSvg.x,
+        panY: current.panY + currentSvg.y - previousSvg.y,
+      }));
+      dragRef.current = { x: event.clientX, y: event.clientY };
+    };
+    const finish = () => {
+      dragRef.current = null;
+      setDragging(false);
+    };
+    const preventMenu = (event: MouseEvent) => event.preventDefault();
+
+    window.addEventListener("mousemove", handleMouseMove, { passive: false });
+    window.addEventListener("mouseup", finish);
+    window.addEventListener("blur", finish);
+    window.addEventListener("contextmenu", preventMenu);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", finish);
+      window.removeEventListener("blur", finish);
+      window.removeEventListener("contextmenu", preventMenu);
+    };
+  }, [dragging]);
 
   const isEmpty = !dxfPaths.length && !gcodePaths.length;
 
   return (
     <Box sx={{ position: "relative", width: "100%", minHeight: 440, aspectRatio: `${WIDTH}/${HEIGHT}`, bgcolor: "#0a0e13", borderRadius: 2, overflow: "hidden", border: "1px solid", borderColor: "divider" }}>
-      <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} width="100%" height="100%" role="img" aria-label="Koordinatensystem mit DXF-Konturen und G-Code-Werkzeugwegen">
+      <svg
+        ref={svgRef}
+        viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
+        width="100%"
+        height="100%"
+        role="img"
+        aria-label="Interaktives Koordinatensystem mit DXF-Konturen und G-Code-Werkzeugwegen"
+        onContextMenu={(event) => event.preventDefault()}
+        onDoubleClick={(event) => {
+          if (event.button !== 0 || event.altKey) return;
+          zoomAt(svgPoint(event.clientX, event.clientY), 1.8);
+        }}
+        onClick={(event) => {
+          if (event.button === 0 && event.altKey) zoomAt(svgPoint(event.clientX, event.clientY), 1 / 1.8);
+        }}
+        onMouseDown={(event) => {
+          if (event.button !== 2) return;
+          event.preventDefault();
+          dragRef.current = { x: event.clientX, y: event.clientY };
+          setDragging(true);
+        }}
+        style={{ cursor: dragging ? "grabbing" : "default", touchAction: "none" }}
+      >
         <rect width={WIDTH} height={HEIGHT} fill="#0a0e13" />
         {scene.xTicks.map((value) => {
           const [x] = scene.project(value, 0);
@@ -88,7 +202,7 @@ export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], sel
         {selectingOrigin ? referencePoints.map((point, index) => {
           const [cx, cy] = scene.project(point.x, point.y);
           const select = () => onSelectOrigin?.(index);
-          return <circle key={`origin-${index}`} cx={cx} cy={cy} r={7} fill="#ff5d73" stroke="#fff" strokeWidth={2} role="button" tabIndex={0} aria-label={`Nullpunkt bei X ${formatTick(point.x)}, Y ${formatTick(point.y)} setzen`} onClick={select} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") select(); }} style={{ cursor: "crosshair" }} />;
+          return <circle key={`origin-${index}`} cx={cx} cy={cy} r={7} fill="#ff5d73" stroke="#fff" strokeWidth={2} role="button" tabIndex={0} aria-label={`Nullpunkt bei X ${formatTick(point.x)}, Y ${formatTick(point.y)} setzen`} onClick={(event) => { if (event.altKey) return; event.stopPropagation(); select(); }} onDoubleClick={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") select(); }} style={{ cursor: "crosshair" }} />;
         }) : null}
       </svg>
       {isEmpty ? (
@@ -103,6 +217,11 @@ export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], sel
         <Legend color="#8a96a8" label="Eilgang" dashed />
       </Stack>
       <Typography variant="caption" color="text.secondary" sx={{ position: "absolute", left: 18, bottom: 10 }}>Raster: {scene.step.toLocaleString("de-DE")} mm</Typography>
+      <Typography variant="caption" color="text.secondary" sx={{ position: "absolute", left: "50%", bottom: 10, transform: "translateX(-50%)", pointerEvents: "none" }}>Doppelklick: hinein · Alt + Linksklick: heraus · Rechtsziehen: bewegen</Typography>
+      <Stack spacing={0.5} sx={{ position: "absolute", right: 18, bottom: 22, bgcolor: "#151b23e6", p: 0.5, borderRadius: 1.5, border: "1px solid", borderColor: "divider" }}>
+        <IconButton size="small" color="primary" title="Hineinzoomen" aria-label="In das Koordinatensystem hineinzoomen" onClick={() => zoomAt({ x: WIDTH / 2, y: HEIGHT / 2 }, 1.5)}><AddRounded /></IconButton>
+        <IconButton size="small" color="primary" title="Herauszoomen" aria-label="Aus dem Koordinatensystem herauszoomen" onClick={() => zoomAt({ x: WIDTH / 2, y: HEIGHT / 2 }, 1 / 1.5)}><RemoveRounded /></IconButton>
+      </Stack>
       {selectingOrigin ? <Typography variant="caption" sx={{ position: "absolute", left: "50%", top: 16, transform: "translateX(-50%)", px: 1.5, py: 0.75, bgcolor: "#ff5d73", color: "#fff", borderRadius: 1, fontWeight: 750 }}>Eckpunkt als X0 / Y0 auswählen</Typography> : null}
     </Box>
   );

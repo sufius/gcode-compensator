@@ -79,6 +79,12 @@ function segmentIntersectsBox(start: Point, end: Point, box: ScreenBox) {
     || linesIntersect(start, end, bottomLeft, topLeft);
 }
 
+function mergeSelectedSegments(current: SelectedSegment[], additions: SelectedSegment[]) {
+  const segments = new Map(current.map((segment) => [`${segment.pathIndex}:${segment.segmentIndex}`, segment]));
+  additions.forEach((segment) => segments.set(`${segment.pathIndex}:${segment.segmentIndex}`, segment));
+  return [...segments.values()];
+}
+
 function paddedBounds(bounds: Bounds): Bounds {
   const width = Math.max(bounds.maxX - bounds.minX, 1);
   const height = Math.max(bounds.maxY - bounds.minY, 1);
@@ -103,10 +109,12 @@ export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], sel
   const dragRef = useRef<Point | null>(null);
   const selectionStartRef = useRef<Point | null>(null);
   const selectionCurrentRef = useRef<Point | null>(null);
+  const additiveSelectionRef = useRef(false);
   const [dragging, setDragging] = useState(false);
   const [drawingSelection, setDrawingSelection] = useState(false);
   const [selectionBox, setSelectionBox] = useState<ScreenBox | null>(null);
   const [selection, setSelection] = useState<{ paths: Path[]; segments: SelectedSegment[] } | null>(null);
+  const [hoveredSegment, setHoveredSegment] = useState<{ paths: Path[]; segment: SelectedSegment } | null>(null);
   const [viewport, setViewport] = useState<Viewport>({ zoom: 1, panX: 0, panY: 0 });
 
   const scene = useMemo(() => {
@@ -231,6 +239,7 @@ export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], sel
     const finish = () => {
       const start = selectionStartRef.current;
       const current = selectionCurrentRef.current;
+      const additive = additiveSelectionRef.current;
       if (start && current) {
         const box = normalizedBox(start, current);
         if (box.maxX - box.minX >= 3 && box.maxY - box.minY >= 3) {
@@ -243,13 +252,21 @@ export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], sel
               if (segmentIntersectsBox({ x: startX, y: startY }, { x: endX, y: endY }, box)) segments.push({ pathIndex, segmentIndex });
             }
           });
-          setSelection({ paths: gcodePaths, segments });
+          setSelection((currentSelection) => ({
+            paths: gcodePaths,
+            segments: additive && currentSelection?.paths === gcodePaths
+              ? mergeSelectedSegments(currentSelection.segments, segments)
+              : segments,
+          }));
         } else {
-          setSelection({ paths: gcodePaths, segments: [] });
+          setSelection((currentSelection) => additive && currentSelection?.paths === gcodePaths
+            ? currentSelection
+            : { paths: gcodePaths, segments: [] });
         }
       }
       selectionStartRef.current = null;
       selectionCurrentRef.current = null;
+      additiveSelectionRef.current = false;
       setSelectionBox(null);
       setDrawingSelection(false);
     };
@@ -265,6 +282,18 @@ export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], sel
   }, [drawingSelection, gcodePaths, scene, svgPoint]);
 
   const selectedSegments = selection?.paths === gcodePaths ? selection.segments : [];
+  const activeHoveredSegment = hoveredSegment?.paths === gcodePaths ? hoveredSegment.segment : null;
+
+  function toggleSegmentSelection(segment: SelectedSegment) {
+    setSelection((currentSelection) => ({
+      paths: gcodePaths,
+      segments: currentSelection?.paths === gcodePaths
+        ? currentSelection.segments.some((current) => current.pathIndex === segment.pathIndex && current.segmentIndex === segment.segmentIndex)
+          ? currentSelection.segments.filter((current) => current.pathIndex !== segment.pathIndex || current.segmentIndex !== segment.segmentIndex)
+          : mergeSelectedSegments(currentSelection.segments, [segment])
+        : [segment],
+    }));
+  }
 
   const isEmpty = !dxfPaths.length && !gcodePaths.length;
 
@@ -284,6 +313,7 @@ export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], sel
             const start = svgPoint(event.clientX, event.clientY);
             selectionStartRef.current = start;
             selectionCurrentRef.current = start;
+            additiveSelectionRef.current = event.ctrlKey || event.shiftKey;
             setSelectionBox(normalizedBox(start, start));
             setDrawingSelection(true);
           } else if (event.button === 2) {
@@ -311,6 +341,33 @@ export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], sel
           const d = pathData({ points: [path.points[segmentIndex], path.points[segmentIndex + 1]] }, scene.project);
           return <path key={`selected-${pathIndex}-${segmentIndex}`} d={d} fill="none" stroke="#ff4fd8" strokeWidth={5} vectorEffect="non-scaling-stroke" strokeLinecap="round" />;
         })}
+        {activeHoveredSegment ? (() => {
+          const path = gcodePaths[activeHoveredSegment.pathIndex];
+          if (!path?.points[activeHoveredSegment.segmentIndex + 1]) return null;
+          const d = pathData({ points: [path.points[activeHoveredSegment.segmentIndex], path.points[activeHoveredSegment.segmentIndex + 1]] }, scene.project);
+          return <path d={d} fill="none" stroke="#fff3c4" strokeWidth={7} strokeOpacity={0.9} vectorEffect="non-scaling-stroke" strokeLinecap="round" pointerEvents="none" />;
+        })() : null}
+        {gcodePaths.map((path, pathIndex) => path.rapid ? null : path.points.slice(0, -1).map((point, segmentIndex) => {
+          const segment = { pathIndex, segmentIndex };
+          const d = pathData({ points: [point, path.points[segmentIndex + 1]] }, scene.project);
+          return <path
+            key={`hit-${pathIndex}-${segmentIndex}`}
+            d={d}
+            fill="none"
+            stroke="transparent"
+            strokeWidth={16}
+            vectorEffect="non-scaling-stroke"
+            pointerEvents="stroke"
+            cursor="pointer"
+            onMouseEnter={() => setHoveredSegment({ paths: gcodePaths, segment })}
+            onMouseLeave={() => setHoveredSegment((current) => current?.paths === gcodePaths && current.segment.pathIndex === pathIndex && current.segment.segmentIndex === segmentIndex ? null : current)}
+            onMouseDown={(event) => {
+              if (!event.ctrlKey && !event.shiftKey) return;
+              event.preventDefault();
+              toggleSegmentSelection(segment);
+            }}
+          />;
+        }))}
         {selectionBox ? <rect x={selectionBox.minX} y={selectionBox.minY} width={selectionBox.maxX - selectionBox.minX} height={selectionBox.maxY - selectionBox.minY} fill="#6ea8fe22" stroke="#6ea8fe" strokeWidth={1.5} strokeDasharray="7 5" vectorEffect="non-scaling-stroke" pointerEvents="none" /> : null}
         {selectingOrigin ? referencePoints.map((point, index) => {
           const [cx, cy] = scene.project(point.x, point.y);
@@ -330,7 +387,7 @@ export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], sel
         <Legend color="#8a96a8" label="Eilgang" dashed />
       </Stack>
       <Typography variant="caption" color="text.secondary" sx={{ position: "absolute", left: 18, bottom: 10 }}>Raster: {scene.step.toLocaleString("de-DE")} mm</Typography>
-      <Typography variant="caption" color="text.secondary" sx={{ position: "absolute", left: "50%", bottom: 10, transform: "translateX(-50%)", pointerEvents: "none" }}>Links ziehen: Fräsbahn auswählen · Strg + Mausrad: zoomen · Rechtsziehen: bewegen</Typography>
+      <Typography variant="caption" color="text.secondary" sx={{ position: "absolute", left: "50%", bottom: 10, transform: "translateX(-50%)", pointerEvents: "none" }}>Links ziehen: auswählen · Strg/Shift + Klick: umschalten · Strg/Shift + Rahmen: hinzufügen · Strg + Mausrad: zoomen · Rechtsziehen: bewegen</Typography>
       {selectedSegments.length ? <Typography variant="caption" sx={{ position: "absolute", left: 18, top: 16, px: 1.25, py: 0.6, bgcolor: "#ff4fd822", color: "#ff8ee6", border: "1px solid #ff4fd866", borderRadius: 1 }}>{selectedSegments.length} Segmente ausgewählt</Typography> : null}
       <Stack spacing={0.5} sx={{ position: "absolute", right: 18, bottom: 22, bgcolor: "#151b23e6", p: 0.5, borderRadius: 1.5, border: "1px solid", borderColor: "divider" }}>
         <IconButton size="small" color="primary" title="Hineinzoomen" aria-label="In das Koordinatensystem hineinzoomen" onClick={() => zoomAt({ x: WIDTH / 2, y: HEIGHT / 2 }, 1.5)}><AddRounded /></IconButton>

@@ -132,6 +132,16 @@ export function offsetSelectedGCode(source: string, result: GCodeResult, selecte
     mark(path.points[path.points.length - 1]);
   });
 
+  return rewriteGCodeWithDisplacements(source, result, displacements);
+}
+
+export function offsetSelectedGCodeNodes(source: string, result: GCodeResult, selectedNodes: Point[], offset: Point) {
+  if (!selectedNodes.length || (!offset.x && !offset.y)) return source;
+  const displacements = new Map(selectedNodes.map((point) => [pointKey(point), offset]));
+  return rewriteGCodeWithDisplacements(source, result, displacements);
+}
+
+function rewriteGCodeWithDisplacements(source: string, result: GCodeResult, displacements: Map<string, Point>) {
   const desiredTargets = result.paths.map((path) => {
     const target = path.points[path.points.length - 1];
     const displacement = displacements.get(pointKey(target));

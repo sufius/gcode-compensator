@@ -104,9 +104,10 @@ function DirectionField({ direction, label, icon, value, min, max, gridColumn, g
   );
 }
 
-export function OffsetControls({ title, description, enabled, selectedCount, busy, onCommit }: {
+export function OffsetControls({ title, description, selectionNoun = "G-Code-Bewegungen", enabled, selectedCount, busy, onCommit }: {
   title: string;
   description: string;
+  selectionNoun?: string;
   enabled: boolean;
   selectedCount: number;
   busy: boolean;
@@ -126,7 +127,7 @@ export function OffsetControls({ title, description, enabled, selectedCount, bus
         <Box sx={{ minWidth: 220 }}>
           <Typography sx={{ fontWeight: 750 }}>{title}</Typography>
           <Typography variant="body2" color="text.secondary">
-            {selectedCount ? `${selectedCount} G-Code-Bewegungen ausgewählt` : "Zuerst mindestens ein Fräsbahnsegment auswählen"}
+            {selectedCount ? `${selectedCount} ${selectionNoun} ausgewählt` : `Zuerst mindestens ein Element auswählen`}
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{description}</Typography>
           <Typography variant="caption" color="text.secondary">Anwenden mit Enter oder Fokusverlust · ± ändert in 0,1-mm-Schritten</Typography>

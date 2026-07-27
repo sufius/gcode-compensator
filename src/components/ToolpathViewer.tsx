@@ -85,6 +85,10 @@ function mergeSelectedSegments(current: SelectedSegment[], additions: SelectedSe
   return [...segments.values()];
 }
 
+function nodeKey(point: Point) {
+  return `${point.x.toFixed(5)}:${point.y.toFixed(5)}`;
+}
+
 function paddedBounds(bounds: Bounds): Bounds {
   const width = Math.max(bounds.maxX - bounds.minX, 1);
   const height = Math.max(bounds.maxY - bounds.minY, 1);
@@ -103,9 +107,11 @@ type ViewerProps = {
   selectingOrigin?: boolean;
   onSelectOrigin?: (index: number) => void;
   onSelectionChange?: (pathIndices: number[]) => void;
+  nodeMode?: boolean;
+  onNodeSelectionChange?: (points: Point[]) => void;
 };
 
-export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], selectingOrigin = false, onSelectOrigin, onSelectionChange }: ViewerProps) {
+export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], selectingOrigin = false, onSelectOrigin, onSelectionChange, nodeMode = false, onNodeSelectionChange }: ViewerProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const dragRef = useRef<Point | null>(null);
   const selectionStartRef = useRef<Point | null>(null);
@@ -115,6 +121,7 @@ export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], sel
   const [drawingSelection, setDrawingSelection] = useState(false);
   const [selectionBox, setSelectionBox] = useState<ScreenBox | null>(null);
   const [selection, setSelection] = useState<{ paths: Path[]; segments: SelectedSegment[] } | null>(null);
+  const [nodeSelection, setNodeSelection] = useState<{ paths: Path[]; keys: string[] } | null>(null);
   const [hoveredSegment, setHoveredSegment] = useState<{ paths: Path[]; segment: SelectedSegment } | null>(null);
   const [viewport, setViewport] = useState<Viewport>({ zoom: 1, panX: 0, panY: 0 });
 
@@ -150,6 +157,16 @@ export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], sel
     const step = niceStep(Math.max(visible.maxX - visible.minX, visible.maxY - visible.minY));
     return { project, xTicks: ticks(visible.minX, visible.maxX, step), yTicks: ticks(visible.minY, visible.maxY, step), step };
   }, [dxfPaths, gcodePaths, viewport]);
+
+  const gcodeNodes = useMemo(() => {
+    const nodes = new Map<string, Point>();
+    gcodePaths.forEach((path) => {
+      if (path.rapid || path.points.length < 2) return;
+      const endpoints = [path.points[0], path.points[path.points.length - 1]];
+      endpoints.forEach((point) => nodes.set(nodeKey(point), point));
+    });
+    return [...nodes.entries()].map(([key, point]) => ({ key, point }));
+  }, [gcodePaths]);
 
   const svgPoint = useCallback((clientX: number, clientY: number): Point => {
     const svg = svgRef.current;
@@ -244,6 +261,18 @@ export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], sel
       if (start && current) {
         const box = normalizedBox(start, current);
         if (box.maxX - box.minX >= 3 && box.maxY - box.minY >= 3) {
+          if (nodeMode) {
+            const keys = gcodeNodes.filter(({ point }) => {
+              const [x, y] = scene.project(point.x, point.y);
+              return pointInBox({ x, y }, box);
+            }).map((node) => node.key);
+            setNodeSelection((currentSelection) => ({
+              paths: gcodePaths,
+              keys: additive && currentSelection?.paths === gcodePaths
+                ? [...new Set([...currentSelection.keys, ...keys])]
+                : keys,
+            }));
+          } else {
           const segments: SelectedSegment[] = [];
           gcodePaths.forEach((path, pathIndex) => {
             if (path.rapid) return;
@@ -259,10 +288,13 @@ export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], sel
               ? mergeSelectedSegments(currentSelection.segments, segments)
               : segments,
           }));
+          }
         } else {
-          setSelection((currentSelection) => additive && currentSelection?.paths === gcodePaths
-            ? currentSelection
-            : { paths: gcodePaths, segments: [] });
+          if (nodeMode) {
+            setNodeSelection((currentSelection) => additive && currentSelection?.paths === gcodePaths ? currentSelection : { paths: gcodePaths, keys: [] });
+          } else {
+            setSelection((currentSelection) => additive && currentSelection?.paths === gcodePaths ? currentSelection : { paths: gcodePaths, segments: [] });
+          }
         }
       }
       selectionStartRef.current = null;
@@ -280,10 +312,11 @@ export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], sel
       window.removeEventListener("mouseup", finish);
       window.removeEventListener("blur", finish);
     };
-  }, [drawingSelection, gcodePaths, scene, svgPoint]);
+  }, [drawingSelection, gcodeNodes, gcodePaths, nodeMode, scene, svgPoint]);
 
   const selectedSegments = selection?.paths === gcodePaths ? selection.segments : [];
   const activeHoveredSegment = hoveredSegment?.paths === gcodePaths ? hoveredSegment.segment : null;
+  const selectedNodeKeys = nodeSelection?.paths === gcodePaths ? nodeSelection.keys : [];
   const selectedPathSignature = [...new Set(selectedSegments.map((segment) => segment.pathIndex))].sort((a, b) => a - b).join(",");
 
   useEffect(() => {
@@ -291,6 +324,14 @@ export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], sel
     const timer = window.setTimeout(() => onSelectionChange?.(pathIndices), 0);
     return () => window.clearTimeout(timer);
   }, [onSelectionChange, selectedPathSignature]);
+
+  const selectedNodeSignature = [...selectedNodeKeys].sort().join("|");
+  useEffect(() => {
+    const selected = new Set(selectedNodeSignature ? selectedNodeSignature.split("|") : []);
+    const points = gcodeNodes.filter((node) => selected.has(node.key)).map((node) => node.point);
+    const timer = window.setTimeout(() => onNodeSelectionChange?.(points), 0);
+    return () => window.clearTimeout(timer);
+  }, [gcodeNodes, onNodeSelectionChange, selectedNodeSignature]);
 
   function toggleSegmentSelection(segment: SelectedSegment) {
     setSelection((currentSelection) => ({
@@ -301,6 +342,14 @@ export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], sel
           : mergeSelectedSegments(currentSelection.segments, [segment])
         : [segment],
     }));
+  }
+
+  function toggleNodeSelection(key: string, additive: boolean) {
+    setNodeSelection((currentSelection) => {
+      const current = currentSelection?.paths === gcodePaths ? currentSelection.keys : [];
+      const keys = current.includes(key) ? current.filter((item) => item !== key) : additive ? [...current, key] : [key];
+      return { paths: gcodePaths, keys };
+    });
   }
 
   const isEmpty = !dxfPaths.length && !gcodePaths.length;
@@ -343,19 +392,19 @@ export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], sel
         })}
         {dxfPaths.map((path, index) => <path key={`dxf-${index}`} d={pathData(path, scene.project)} fill="none" stroke="#55d6be" strokeWidth="2.2" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />)}
         {gcodePaths.map((path, index) => <path key={`gcode-${index}`} d={pathData(path, scene.project)} fill="none" stroke={path.rapid ? "#8a96a8" : "#ffb454"} strokeOpacity={path.rapid ? 0.5 : 0.95} strokeDasharray={path.rapid ? "7 6" : undefined} strokeWidth={path.rapid ? 1.2 : 2} vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />)}
-        {selectedSegments.map(({ pathIndex, segmentIndex }) => {
+        {!nodeMode ? selectedSegments.map(({ pathIndex, segmentIndex }) => {
           const path = gcodePaths[pathIndex];
           if (!path?.points[segmentIndex + 1]) return null;
           const d = pathData({ points: [path.points[segmentIndex], path.points[segmentIndex + 1]] }, scene.project);
           return <path key={`selected-${pathIndex}-${segmentIndex}`} d={d} fill="none" stroke="#ff4fd8" strokeWidth={5} vectorEffect="non-scaling-stroke" strokeLinecap="round" />;
-        })}
-        {activeHoveredSegment ? (() => {
+        }) : null}
+        {!nodeMode && activeHoveredSegment ? (() => {
           const path = gcodePaths[activeHoveredSegment.pathIndex];
           if (!path?.points[activeHoveredSegment.segmentIndex + 1]) return null;
           const d = pathData({ points: [path.points[activeHoveredSegment.segmentIndex], path.points[activeHoveredSegment.segmentIndex + 1]] }, scene.project);
           return <path d={d} fill="none" stroke="#fff3c4" strokeWidth={7} strokeOpacity={0.9} vectorEffect="non-scaling-stroke" strokeLinecap="round" pointerEvents="none" />;
         })() : null}
-        {gcodePaths.map((path, pathIndex) => path.rapid ? null : path.points.slice(0, -1).map((point, segmentIndex) => {
+        {!nodeMode ? gcodePaths.map((path, pathIndex) => path.rapid ? null : path.points.slice(0, -1).map((point, segmentIndex) => {
           const segment = { pathIndex, segmentIndex };
           const d = pathData({ points: [point, path.points[segmentIndex + 1]] }, scene.project);
           return <path
@@ -375,7 +424,28 @@ export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], sel
               toggleSegmentSelection(segment);
             }}
           />;
-        }))}
+        })) : null}
+        {nodeMode ? gcodeNodes.map(({ key, point }) => {
+          const [cx, cy] = scene.project(point.x, point.y);
+          const selected = selectedNodeKeys.includes(key);
+          return <circle
+            key={`node-${key}`}
+            cx={cx}
+            cy={cy}
+            r={selected ? 7 : 5.5}
+            fill={selected ? "#ff4fd8" : "#0a0e13"}
+            stroke={selected ? "#fff" : "#6ea8fe"}
+            strokeWidth={2.5}
+            vectorEffect="non-scaling-stroke"
+            role="button"
+            tabIndex={0}
+            aria-label={`G-Code-Knoten X ${formatTick(point.x)}, Y ${formatTick(point.y)}`}
+            onMouseDown={(event) => event.stopPropagation()}
+            onClick={(event) => { event.stopPropagation(); toggleNodeSelection(key, event.ctrlKey || event.shiftKey); }}
+            onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") toggleNodeSelection(key, event.ctrlKey || event.shiftKey); }}
+            style={{ cursor: "pointer" }}
+          />;
+        }) : null}
         {selectionBox ? <rect x={selectionBox.minX} y={selectionBox.minY} width={selectionBox.maxX - selectionBox.minX} height={selectionBox.maxY - selectionBox.minY} fill="#6ea8fe22" stroke="#6ea8fe" strokeWidth={1.5} strokeDasharray="7 5" vectorEffect="non-scaling-stroke" pointerEvents="none" /> : null}
         {selectingOrigin ? referencePoints.map((point, index) => {
           const [cx, cy] = scene.project(point.x, point.y);
@@ -395,8 +465,8 @@ export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], sel
         <Legend color="#8a96a8" label="Eilgang" dashed />
       </Stack>
       <Typography variant="caption" color="text.secondary" sx={{ position: "absolute", left: 18, bottom: 10 }}>Raster: {scene.step.toLocaleString("de-DE")} mm</Typography>
-      <Typography variant="caption" color="text.secondary" sx={{ position: "absolute", left: "50%", bottom: 10, transform: "translateX(-50%)", pointerEvents: "none" }}>Links ziehen: auswählen · Strg/Shift + Klick: umschalten · Strg/Shift + Rahmen: hinzufügen · Strg + Mausrad: zoomen · Rechtsziehen: bewegen</Typography>
-      {selectedSegments.length ? <Typography variant="caption" sx={{ position: "absolute", left: 18, top: 16, px: 1.25, py: 0.6, bgcolor: "#ff4fd822", color: "#ff8ee6", border: "1px solid #ff4fd866", borderRadius: 1 }}>{selectedSegments.length} Segmente ausgewählt</Typography> : null}
+      <Typography variant="caption" color="text.secondary" sx={{ position: "absolute", left: "50%", bottom: 10, transform: "translateX(-50%)", pointerEvents: "none" }}>{nodeMode ? "Knoten: Klick/Rahmen auswählen · Strg/Shift: hinzufügen · Strg + Mausrad: zoomen · Rechtsziehen: bewegen" : "Links ziehen: auswählen · Strg/Shift + Klick: umschalten · Strg/Shift + Rahmen: hinzufügen · Strg + Mausrad: zoomen · Rechtsziehen: bewegen"}</Typography>
+      {(nodeMode ? selectedNodeKeys.length : selectedSegments.length) ? <Typography variant="caption" sx={{ position: "absolute", left: 18, top: 16, px: 1.25, py: 0.6, bgcolor: "#ff4fd822", color: "#ff8ee6", border: "1px solid #ff4fd866", borderRadius: 1 }}>{nodeMode ? `${selectedNodeKeys.length} Knoten ausgewählt` : `${selectedSegments.length} Segmente ausgewählt`}</Typography> : null}
       <Stack spacing={0.5} sx={{ position: "absolute", right: 18, bottom: 22, bgcolor: "#151b23e6", p: 0.5, borderRadius: 1.5, border: "1px solid", borderColor: "divider" }}>
         <IconButton size="small" color="primary" title="Hineinzoomen" aria-label="In das Koordinatensystem hineinzoomen" onClick={() => zoomAt({ x: WIDTH / 2, y: HEIGHT / 2 }, 1.5)}><AddRounded /></IconButton>
         <IconButton size="small" color="primary" title="Herauszoomen" aria-label="Aus dem Koordinatensystem herauszoomen" onClick={() => zoomAt({ x: WIDTH / 2, y: HEIGHT / 2 }, 1 / 1.5)}><RemoveRounded /></IconButton>

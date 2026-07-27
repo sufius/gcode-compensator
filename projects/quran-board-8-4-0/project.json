@@ -24,7 +24,7 @@
     "showGrid": true,
     "showRapidMoves": true
   },
-  "updatedAt": "2026-07-27T18:44:23.168Z",
+  "updatedAt": "2026-07-27T20:58:58.647Z",
   "versions": [
     {
       "id": "v1",
@@ -53,7 +53,77 @@
           "y": 2.365
         }
       }
+    },
+    {
+      "id": "v3",
+      "createdAt": "2026-07-27T19:21:35.025Z",
+      "label": "Knoten verschoben: Y 0,4 mm",
+      "gcodePath": "versions/v3/toolpath.gcode",
+      "gcodeSha256": "59a303f7497168680cb16ca08b6842062e6e3c9722a0e0b96ccca12538e2678c",
+      "dxfTransform": {
+        "rotationDegrees": 90,
+        "origin": {
+          "x": -244.365,
+          "y": 2.365
+        }
+      }
+    },
+    {
+      "id": "v4",
+      "createdAt": "2026-07-27T20:55:05.131Z",
+      "label": "Bewegung verschoben: Y -0,7 mm",
+      "gcodePath": "versions/v4/toolpath.gcode",
+      "gcodeSha256": "b227dd0fcf4b11ad9735d2ee736d31e4ef63b8708eaa9834ae3aff34e48dad78",
+      "dxfTransform": {
+        "rotationDegrees": 90,
+        "origin": {
+          "x": -244.365,
+          "y": 2.365
+        }
+      }
+    },
+    {
+      "id": "v5",
+      "createdAt": "2026-07-27T20:56:43.908Z",
+      "label": "Knoten verschoben: Y 0,1 mm",
+      "gcodePath": "versions/v5/toolpath.gcode",
+      "gcodeSha256": "92d831bec1b6232521ec94f8b99f1db97cff1016293abced8b6d84eaae4259ed",
+      "dxfTransform": {
+        "rotationDegrees": 90,
+        "origin": {
+          "x": -244.365,
+          "y": 2.365
+        }
+      }
+    },
+    {
+      "id": "v6",
+      "createdAt": "2026-07-27T20:57:02.321Z",
+      "label": "Knoten verschoben: Y -0,1 mm",
+      "gcodePath": "versions/v6/toolpath.gcode",
+      "gcodeSha256": "24e6c8d3c9399fc704c9a2e3fee7bc7c013464abd95499f78224d6709f5e7e07",
+      "dxfTransform": {
+        "rotationDegrees": 90,
+        "origin": {
+          "x": -244.365,
+          "y": 2.365
+        }
+      }
+    },
+    {
+      "id": "v7",
+      "createdAt": "2026-07-27T20:58:33.143Z",
+      "label": "Bewegung verschoben: X 0,2 mm",
+      "gcodePath": "versions/v7/toolpath.gcode",
+      "gcodeSha256": "bfc5968ca6b6f58c0eab4dc585aa757d414ffa4c84c011567b551b4f3085977f",
+      "dxfTransform": {
+        "rotationDegrees": 90,
+        "origin": {
+          "x": -244.365,
+          "y": 2.365
+        }
+      }
     }
   ],
-  "currentVersion": "v2"
+  "currentVersion": "v7"
 }

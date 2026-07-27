@@ -7,17 +7,18 @@ import DeleteOutlineRounded from "@mui/icons-material/DeleteOutlineRounded";
 import DeleteForeverRounded from "@mui/icons-material/DeleteForeverRounded";
 import FolderOpenRounded from "@mui/icons-material/FolderOpenRounded";
 import MyLocationRounded from "@mui/icons-material/MyLocationRounded";
+import PolylineRounded from "@mui/icons-material/PolylineRounded";
 import RestartAltRounded from "@mui/icons-material/RestartAltRounded";
 import Rotate90DegreesCcwRounded from "@mui/icons-material/Rotate90DegreesCcwRounded";
 import Rotate90DegreesCwRounded from "@mui/icons-material/Rotate90DegreesCwRounded";
 import SaveRounded from "@mui/icons-material/SaveRounded";
 import SaveAsRounded from "@mui/icons-material/SaveAsRounded";
-import { Alert, Box, Button, Chip, Container, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, FormControl, IconButton, InputLabel, MenuItem, Paper, Select, Slider, Stack, TextField, Typography } from "@mui/material";
+import { Alert, Box, Button, Chip, Container, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, FormControl, IconButton, InputLabel, MenuItem, Paper, Select, Slider, Stack, TextField, Tooltip, Typography } from "@mui/material";
 import { FileDropzone } from "@/components/FileDropzone";
 import { ToolpathViewer } from "@/components/ToolpathViewer";
 import { OffsetControls, OffsetDirection } from "@/components/OffsetControls";
 import { parseDxf, DxfResult } from "@/lib/dxf";
-import { offsetSelectedGCode, parseGCode, GCodeResult } from "@/lib/gcode";
+import { offsetSelectedGCode, offsetSelectedGCodeNodes, parseGCode, GCodeResult } from "@/lib/gcode";
 import { Point, transformPaths, transformPoint } from "@/lib/geometry";
 import type { LoadedProject, ProjectSummary, ProjectVersion, SaveProjectRequest } from "@/lib/project";
 
@@ -66,6 +67,8 @@ function HomeContent() {
   const [projectName, setProjectName] = useState("");
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [selectedPathIndices, setSelectedPathIndices] = useState<number[]>([]);
+  const [selectedNodes, setSelectedNodes] = useState<Point[]>([]);
+  const [nodeMode, setNodeMode] = useState(false);
   const [versions, setVersions] = useState<ProjectVersion[]>([]);
   const [currentVersion, setCurrentVersion] = useState("");
   const [versionBusy, setVersionBusy] = useState(false);
@@ -226,11 +229,13 @@ function HomeContent() {
     setVersions(project.manifest.versions ?? []);
     setCurrentVersion(project.manifest.currentVersion ?? "");
     setSelectedPathIndices([]);
+    setSelectedNodes([]);
     setSaveState("saved");
   }
 
   async function commitOffset(direction: OffsetDirection, rawValue: number) {
-    if (!gcode || !selectedPathIndices.length) return false;
+    const selectionCount = nodeMode ? selectedNodes.length : selectedPathIndices.length;
+    if (!gcode || !selectionCount) return false;
     if (!activeProject) {
       setError("Bitte das Projekt zuerst speichern, bevor eine neue G-Code-Version angelegt wird.");
       return false;
@@ -241,7 +246,9 @@ function HomeContent() {
       x: direction === "left" ? -amount : direction === "right" ? amount : 0,
       y: direction === "down" ? -amount : direction === "up" ? amount : 0,
     };
-    const content = offsetSelectedGCode(gcode.content, gcode.data, selectedPathIndices, offset);
+    const content = nodeMode
+      ? offsetSelectedGCodeNodes(gcode.content, gcode.data, selectedNodes, offset)
+      : offsetSelectedGCode(gcode.content, gcode.data, selectedPathIndices, offset);
     versionOperationRef.current = true;
     setVersionBusy(true);
     try {
@@ -251,7 +258,7 @@ function HomeContent() {
         body: JSON.stringify({
           gcode: { name: gcode.name, content },
           dxfTransform: { rotationDegrees: rotation, origin },
-          label: `Verschoben: ${offset.x ? "X" : "Y"} ${(offset.x || offset.y).toLocaleString("de-DE")} mm`,
+          label: `${nodeMode ? "Knoten" : "Bewegung"} verschoben: ${offset.x ? "X" : "Y"} ${(offset.x || offset.y).toLocaleString("de-DE")} mm`,
         }),
       });
       const project = await response.json() as LoadedProject & { error?: string };
@@ -383,10 +390,11 @@ function HomeContent() {
           <Stack direction={{ xs: "column", lg: "row" }} spacing={2} sx={{ alignItems: "stretch" }}>
             <Box sx={{ flex: 1 }}>
               <OffsetControls
-                title="Verschieben"
-                description="Bewegt Start und Ende der ausgewählten Bewegung gemeinsam."
-                enabled={selectedPathIndices.length > 0}
-                selectedCount={selectedPathIndices.length}
+                title={nodeMode ? "Knoten verschieben" : "Verschieben"}
+                description={nodeMode ? "Addiert den Offset auf jeden ausgewählten Koordinatenknoten." : "Bewegt Start und Ende der ausgewählten Bewegung gemeinsam."}
+                selectionNoun={nodeMode ? "Knoten" : "G-Code-Bewegungen"}
+                enabled={(nodeMode ? selectedNodes.length : selectedPathIndices.length) > 0}
+                selectedCount={nodeMode ? selectedNodes.length : selectedPathIndices.length}
                 busy={versionBusy}
                 onCommit={commitOffset}
               />
@@ -462,7 +470,14 @@ function HomeContent() {
 
           <Paper elevation={8} sx={{ p: { xs: 1.5, md: 2.5 }, border: "1px solid", borderColor: "divider" }}>
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ justifyContent: "space-between", alignItems: { sm: "center" }, mb: 2 }}>
-              <Typography variant="h6" sx={{ fontWeight: 750 }}>2D-Vorschau</Typography>
+              <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                <Typography variant="h6" sx={{ fontWeight: 750 }}>2D-Vorschau</Typography>
+                <Tooltip title={nodeMode ? "Knotenwerkzeug deaktivieren" : "Knotenwerkzeug aktivieren"}>
+                  <IconButton color={nodeMode ? "primary" : "default"} aria-pressed={nodeMode} aria-label="Knotenwerkzeug" onClick={() => setNodeMode((value) => !value)} sx={{ bgcolor: nodeMode ? "primary.main" : "transparent", color: nodeMode ? "primary.contrastText" : undefined }}>
+                    <PolylineRounded />
+                  </IconButton>
+                </Tooltip>
+              </Stack>
               <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
                 {dxf ? <Chip size="small" label={`${dxf.data.entityCount} DXF-Elemente`} color="secondary" variant="outlined" /> : null}
                 {gcode ? <Chip size="small" label={`${gcode.data.paths.filter((path) => !path.rapid).length} Fräsbewegungen`} color="primary" variant="outlined" /> : null}
@@ -480,6 +495,8 @@ function HomeContent() {
                 setSelectingOrigin(false);
               }}
               onSelectionChange={setSelectedPathIndices}
+              nodeMode={nodeMode}
+              onNodeSelectionChange={setSelectedNodes}
             />
           </Paper>
         </Stack>

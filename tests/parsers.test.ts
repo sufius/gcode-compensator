@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { parseDxf } from "../src/lib/dxf";
-import { offsetSelectedGCode, parseGCode } from "../src/lib/gcode";
+import { offsetSelectedGCode, offsetSelectedGCodeNodes, parseGCode } from "../src/lib/gcode";
 import { getBounds } from "../src/lib/geometry";
 import { transformPaths, transformPoint } from "../src/lib/geometry";
 
@@ -131,5 +131,16 @@ test("schreibt Offsets in relativem G-Code konsistent neu", () => {
   const parsed = parseGCode(modified);
   assert.deepEqual(parsed.paths[1].points[0], { x: 0, y: 0.1 });
   assert.deepEqual(parsed.paths[1].points[1], { x: 10, y: 0.1 });
+  assert.deepEqual(parsed.paths[2].points[1], { x: 10, y: 10 });
+});
+
+test("verschiebt ausschließlich ausgewählte G-Code-Knoten", () => {
+  const source = "G21 G90\nG0 X0 Y0\nG1 X10 Y0\nG1 X10 Y10";
+  const result = parseGCode(source);
+  const modified = offsetSelectedGCodeNodes(source, result, [{ x: 10, y: 0 }], { x: 0.1, y: -0.2 });
+  const parsed = parseGCode(modified);
+  assert.deepEqual(parsed.paths[0].points[1], { x: 0, y: 0 });
+  assert.deepEqual(parsed.paths[1].points[1], { x: 10.1, y: -0.2 });
+  assert.deepEqual(parsed.paths[2].points[0], { x: 10.1, y: -0.2 });
   assert.deepEqual(parsed.paths[2].points[1], { x: 10, y: 10 });
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AddRounded from "@mui/icons-material/AddRounded";
 import RemoveRounded from "@mui/icons-material/RemoveRounded";
 import { Box, IconButton, Stack, Typography } from "@mui/material";
@@ -99,7 +99,7 @@ export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], sel
     return { project, xTicks: ticks(visible.minX, visible.maxX, step), yTicks: ticks(visible.minY, visible.maxY, step), step };
   }, [dxfPaths, gcodePaths, viewport]);
 
-  function svgPoint(clientX: number, clientY: number): Point {
+  const svgPoint = useCallback((clientX: number, clientY: number): Point => {
     const svg = svgRef.current;
     if (!svg) return { x: WIDTH / 2, y: HEIGHT / 2 };
     const point = svg.createSVGPoint();
@@ -109,9 +109,9 @@ export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], sel
     if (!matrix) return { x: WIDTH / 2, y: HEIGHT / 2 };
     const transformed = point.matrixTransform(matrix.inverse());
     return { x: transformed.x, y: transformed.y };
-  }
+  }, []);
 
-  function zoomAt(point: Point, factor: number) {
+  const zoomAt = useCallback((point: Point, factor: number) => {
     setViewport((current) => {
       const zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, current.zoom * factor));
       const ratio = zoom / current.zoom;
@@ -121,7 +121,20 @@ export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], sel
         panY: point.y - HEIGHT / 2 - (point.y - HEIGHT / 2 - current.panY) * ratio,
       };
     });
-  }
+  }, []);
+
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const handleWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey) return;
+      event.preventDefault();
+      const factor = Math.exp(-event.deltaY * 0.0025);
+      zoomAt(svgPoint(event.clientX, event.clientY), factor);
+    };
+    svg.addEventListener("wheel", handleWheel, { passive: false });
+    return () => svg.removeEventListener("wheel", handleWheel);
+  }, [svgPoint, zoomAt]);
 
   useEffect(() => {
     if (!dragging) return;
@@ -159,7 +172,7 @@ export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], sel
       window.removeEventListener("blur", finish);
       window.removeEventListener("contextmenu", preventMenu);
     };
-  }, [dragging]);
+  }, [dragging, svgPoint]);
 
   const isEmpty = !dxfPaths.length && !gcodePaths.length;
 
@@ -173,13 +186,6 @@ export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], sel
         role="img"
         aria-label="Interaktives Koordinatensystem mit DXF-Konturen und G-Code-Werkzeugwegen"
         onContextMenu={(event) => event.preventDefault()}
-        onDoubleClick={(event) => {
-          if (event.button !== 0 || event.altKey) return;
-          zoomAt(svgPoint(event.clientX, event.clientY), 1.8);
-        }}
-        onClick={(event) => {
-          if (event.button === 0 && event.altKey) zoomAt(svgPoint(event.clientX, event.clientY), 1 / 1.8);
-        }}
         onMouseDown={(event) => {
           if (event.button !== 2) return;
           event.preventDefault();
@@ -202,7 +208,7 @@ export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], sel
         {selectingOrigin ? referencePoints.map((point, index) => {
           const [cx, cy] = scene.project(point.x, point.y);
           const select = () => onSelectOrigin?.(index);
-          return <circle key={`origin-${index}`} cx={cx} cy={cy} r={7} fill="#ff5d73" stroke="#fff" strokeWidth={2} role="button" tabIndex={0} aria-label={`Nullpunkt bei X ${formatTick(point.x)}, Y ${formatTick(point.y)} setzen`} onClick={(event) => { if (event.altKey) return; event.stopPropagation(); select(); }} onDoubleClick={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") select(); }} style={{ cursor: "crosshair" }} />;
+          return <circle key={`origin-${index}`} cx={cx} cy={cy} r={7} fill="#ff5d73" stroke="#fff" strokeWidth={2} role="button" tabIndex={0} aria-label={`Nullpunkt bei X ${formatTick(point.x)}, Y ${formatTick(point.y)} setzen`} onClick={(event) => { event.stopPropagation(); select(); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") select(); }} style={{ cursor: "crosshair" }} />;
         }) : null}
       </svg>
       {isEmpty ? (
@@ -217,7 +223,7 @@ export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], sel
         <Legend color="#8a96a8" label="Eilgang" dashed />
       </Stack>
       <Typography variant="caption" color="text.secondary" sx={{ position: "absolute", left: 18, bottom: 10 }}>Raster: {scene.step.toLocaleString("de-DE")} mm</Typography>
-      <Typography variant="caption" color="text.secondary" sx={{ position: "absolute", left: "50%", bottom: 10, transform: "translateX(-50%)", pointerEvents: "none" }}>Doppelklick: hinein · Alt + Linksklick: heraus · Rechtsziehen: bewegen</Typography>
+      <Typography variant="caption" color="text.secondary" sx={{ position: "absolute", left: "50%", bottom: 10, transform: "translateX(-50%)", pointerEvents: "none" }}>Strg + Mausrad: zoomen · Rechtsziehen: bewegen</Typography>
       <Stack spacing={0.5} sx={{ position: "absolute", right: 18, bottom: 22, bgcolor: "#151b23e6", p: 0.5, borderRadius: 1.5, border: "1px solid", borderColor: "divider" }}>
         <IconButton size="small" color="primary" title="Hineinzoomen" aria-label="In das Koordinatensystem hineinzoomen" onClick={() => zoomAt({ x: WIDTH / 2, y: HEIGHT / 2 }, 1.5)}><AddRounded /></IconButton>
         <IconButton size="small" color="primary" title="Herauszoomen" aria-label="Aus dem Koordinatensystem herauszoomen" onClick={() => zoomAt({ x: WIDTH / 2, y: HEIGHT / 2 }, 1 / 1.5)}><RemoveRounded /></IconButton>

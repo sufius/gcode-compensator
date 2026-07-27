@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import AddRounded from "@mui/icons-material/AddRounded";
 import ArchitectureRounded from "@mui/icons-material/ArchitectureRounded";
 import DeleteOutlineRounded from "@mui/icons-material/DeleteOutlineRounded";
@@ -23,6 +23,23 @@ type Loaded<T> = { name: string; content: string; data: T };
 type SaveState = "idle" | "dirty" | "saving" | "saved";
 
 export default function Home() {
+  const hydrated = useSyncExternalStore(subscribeToHydration, getClientSnapshot, getServerSnapshot);
+  return hydrated ? <HomeContent /> : null;
+}
+
+function subscribeToHydration() {
+  return () => undefined;
+}
+
+function getClientSnapshot() {
+  return true;
+}
+
+function getServerSnapshot() {
+  return false;
+}
+
+function HomeContent() {
   const [dxf, setDxf] = useState<Loaded<DxfResult> | null>(null);
   const [gcode, setGcode] = useState<Loaded<GCodeResult> | null>(null);
   const [error, setError] = useState<string | null>(null);

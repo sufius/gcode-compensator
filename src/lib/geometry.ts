@@ -4,6 +4,11 @@ export type Path = {
   points: Point[];
   closed?: boolean;
   rapid?: boolean;
+  gcode?: {
+    lineIndex: number;
+    absolute: boolean;
+    unitScale: number;
+  };
 };
 
 export type Bounds = {

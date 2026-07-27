@@ -44,7 +44,9 @@ export function parseGCode(source: string): GCodeResult {
   let motion: Motion = 0;
   let parsedLines = 0;
 
-  for (const rawLine of source.split(/\r?\n/)) {
+  const sourceLines = source.split(/\r?\n/);
+  for (let lineIndex = 0; lineIndex < sourceLines.length; lineIndex += 1) {
+    const rawLine = sourceLines[lineIndex];
     const line = rawLine.replace(/\([^)]*\)/g, "").replace(/;.*$/, "").trim();
     if (!line) continue;
     const words = new Map<string, number>();
@@ -87,13 +89,65 @@ export function parseGCode(source: string): GCodeResult {
         );
         points[0] = position;
         points[points.length - 1] = target;
-        paths.push({ points });
-      } else paths.push({ points: [position, target] });
+        paths.push({ points, gcode: { lineIndex, absolute, unitScale: scale } });
+      } else paths.push({ points: [position, target], gcode: { lineIndex, absolute, unitScale: scale } });
     } else {
-      paths.push({ points: [position, target], rapid: motion === 0 });
+      paths.push({ points: [position, target], rapid: motion === 0, gcode: { lineIndex, absolute, unitScale: scale } });
     }
     position = target;
   }
 
   return { paths, lineCount: parsedLines, units: "mm" };
+}
+
+function pointKey(point: Point) {
+  return `${point.x.toFixed(5)}:${point.y.toFixed(5)}`;
+}
+
+function formatCoordinate(value: number) {
+  const rounded = Math.abs(value) < 5e-7 ? 0 : Number(value.toFixed(5));
+  return String(rounded);
+}
+
+function replaceCoordinate(line: string, letter: "X" | "Y", value: number) {
+  const replacement = `${letter}${formatCoordinate(value)}`;
+  const pattern = new RegExp(`${letter}\\s*[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)`, "i");
+  if (pattern.test(line)) return line.replace(pattern, replacement);
+  const commentIndex = line.indexOf(";");
+  return commentIndex >= 0
+    ? `${line.slice(0, commentIndex).trimEnd()} ${replacement} ${line.slice(commentIndex)}`
+    : `${line.trimEnd()} ${replacement}`;
+}
+
+export type GCodeEditMode = "translate" | "resize";
+
+export function offsetSelectedGCode(source: string, result: GCodeResult, selectedPathIndices: number[], offset: Point, mode: GCodeEditMode = "translate") {
+  if (!selectedPathIndices.length || (!offset.x && !offset.y)) return source;
+  const selected = new Set(selectedPathIndices);
+  const displacements = new Map<string, Point>();
+  const mark = (point: Point) => displacements.set(pointKey(point), offset);
+
+  selected.forEach((index) => {
+    const path = result.paths[index];
+    if (!path || path.rapid) return;
+    if (mode === "translate") mark(path.points[0]);
+    mark(path.points[path.points.length - 1]);
+  });
+
+  const desiredTargets = result.paths.map((path) => {
+    const target = path.points[path.points.length - 1];
+    const displacement = displacements.get(pointKey(target));
+    return displacement ? { x: target.x + displacement.x, y: target.y + displacement.y } : target;
+  });
+  const lines = source.split(/\r?\n/);
+  let previousTarget = result.paths[0]?.points[0] ?? { x: 0, y: 0 };
+  result.paths.forEach((path, index) => {
+    if (!path.gcode) return;
+    const desired = desiredTargets[index];
+    const x = path.gcode.absolute ? desired.x / path.gcode.unitScale : (desired.x - previousTarget.x) / path.gcode.unitScale;
+    const y = path.gcode.absolute ? desired.y / path.gcode.unitScale : (desired.y - previousTarget.y) / path.gcode.unitScale;
+    lines[path.gcode.lineIndex] = replaceCoordinate(replaceCoordinate(lines[path.gcode.lineIndex], "X", x), "Y", y);
+    previousTarget = desired;
+  });
+  return lines.join("\n");
 }

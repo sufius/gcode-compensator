@@ -24,6 +24,17 @@ export type ProjectManifest = {
     showRapidMoves: boolean;
   };
   updatedAt: string;
+  versions?: ProjectVersion[];
+  currentVersion?: string;
+};
+
+export type ProjectVersion = {
+  id: string;
+  createdAt: string;
+  label: string;
+  gcodePath: string;
+  gcodeSha256: string;
+  dxfTransform: ProjectManifest["dxfTransform"];
 };
 
 export type ProjectSummary = {

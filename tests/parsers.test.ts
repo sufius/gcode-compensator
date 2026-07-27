@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { parseDxf } from "../src/lib/dxf";
-import { parseGCode } from "../src/lib/gcode";
+import { offsetSelectedGCode, parseGCode } from "../src/lib/gcode";
 import { getBounds } from "../src/lib/geometry";
 import { transformPaths, transformPoint } from "../src/lib/geometry";
 
@@ -111,4 +111,36 @@ test("rotiert DXF-Pfade um den ausgewählten Nullpunkt", () => {
   assert.equal(point.y, 10);
   const paths = transformPaths([{ points: [origin, { x: 20, y: 5 }] }], 90, origin);
   assert.deepEqual(paths[0].points[0], { x: 0, y: 0 });
+});
+
+test("verschiebt eine ausgewählte G-Code-Bewegung über Start und Ende", () => {
+  const source = "G21 G90\nG0 X0 Y0\nG1 X10 Y0\nG1 X10 Y10\nG1 X0 Y10\nG1 X0 Y0";
+  const result = parseGCode(source);
+  const modified = offsetSelectedGCode(source, result, [1], { x: 0, y: 1 });
+  const parsed = parseGCode(modified);
+  assert.deepEqual(parsed.paths[0].points[1], { x: 0, y: 1 });
+  assert.deepEqual(parsed.paths[1].points[1], { x: 10, y: 1 });
+  assert.deepEqual(parsed.paths[2].points[1], { x: 10, y: 10 });
+  assert.deepEqual(parsed.paths[4].points[1], { x: 0, y: 1 });
+});
+
+test("verlängert eine ausgewählte Bewegung nur über ihren Endpunkt", () => {
+  const source = "G21 G90\nG0 X0 Y0\nG1 X10 Y0\nG1 X10 Y10";
+  const result = parseGCode(source);
+  const modified = offsetSelectedGCode(source, result, [1], { x: 1, y: 0 }, "resize");
+  const parsed = parseGCode(modified);
+  assert.deepEqual(parsed.paths[1].points[0], { x: 0, y: 0 });
+  assert.deepEqual(parsed.paths[1].points[1], { x: 11, y: 0 });
+  assert.deepEqual(parsed.paths[2].points[0], { x: 11, y: 0 });
+  assert.deepEqual(parsed.paths[2].points[1], { x: 10, y: 10 });
+});
+
+test("schreibt Offsets in relativem G-Code konsistent neu", () => {
+  const source = "G21 G91\nG0 X0 Y0\nG1 X10 Y0\nG1 X0 Y10";
+  const result = parseGCode(source);
+  const modified = offsetSelectedGCode(source, result, [1], { x: 0, y: 0.1 });
+  const parsed = parseGCode(modified);
+  assert.deepEqual(parsed.paths[1].points[0], { x: 0, y: 0.1 });
+  assert.deepEqual(parsed.paths[1].points[1], { x: 10, y: 0.1 });
+  assert.deepEqual(parsed.paths[2].points[1], { x: 10, y: 10 });
 });

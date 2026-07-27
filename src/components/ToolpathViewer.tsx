@@ -102,9 +102,10 @@ type ViewerProps = {
   referencePoints?: Point[];
   selectingOrigin?: boolean;
   onSelectOrigin?: (index: number) => void;
+  onSelectionChange?: (pathIndices: number[]) => void;
 };
 
-export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], selectingOrigin = false, onSelectOrigin }: ViewerProps) {
+export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], selectingOrigin = false, onSelectOrigin, onSelectionChange }: ViewerProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const dragRef = useRef<Point | null>(null);
   const selectionStartRef = useRef<Point | null>(null);
@@ -283,6 +284,13 @@ export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], sel
 
   const selectedSegments = selection?.paths === gcodePaths ? selection.segments : [];
   const activeHoveredSegment = hoveredSegment?.paths === gcodePaths ? hoveredSegment.segment : null;
+  const selectedPathSignature = [...new Set(selectedSegments.map((segment) => segment.pathIndex))].sort((a, b) => a - b).join(",");
+
+  useEffect(() => {
+    const pathIndices = selectedPathSignature ? selectedPathSignature.split(",").map(Number) : [];
+    const timer = window.setTimeout(() => onSelectionChange?.(pathIndices), 0);
+    return () => window.clearTimeout(timer);
+  }, [onSelectionChange, selectedPathSignature]);
 
   function toggleSegmentSelection(segment: SelectedSegment) {
     setSelection((currentSelection) => ({

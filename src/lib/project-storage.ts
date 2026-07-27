@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rmdir, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   LoadedProject,
@@ -9,6 +9,7 @@ import {
   ProjectManifest,
   ProjectSummary,
   ProjectUpload,
+  ProjectVersion,
   SaveProjectRequest,
 } from "./project";
 
@@ -122,6 +123,21 @@ export async function saveProject(slug: string, request: SaveProjectRequest): Pr
     view: { showGrid: true, showRapidMoves: true, ...current?.view, ...request.view },
     updatedAt: new Date().toISOString(),
   };
+  if (current?.versions?.length) {
+    manifest.versions = current.versions;
+    manifest.currentVersion = current.currentVersion;
+  } else if (files.gcode) {
+    const initialVersion: ProjectVersion = {
+      id: "v1",
+      createdAt: manifest.updatedAt,
+      label: "Original",
+      gcodePath: files.gcode.path,
+      gcodeSha256: files.gcode.sha256,
+      dxfTransform: manifest.dxfTransform,
+    };
+    manifest.versions = [initialVersion];
+    manifest.currentVersion = initialVersion.id;
+  }
   await atomicJsonWrite(path.join(directory, "project.json"), manifest);
   return manifest;
 }
@@ -136,9 +152,82 @@ async function readProjectInput(directory: string, relativePath: string | undefi
 export async function loadProject(slug: string): Promise<LoadedProject> {
   const directory = projectDirectory(slug);
   const manifest = await readManifest(slug);
+  const activeVersion = manifest.versions?.find((version) => version.id === manifest.currentVersion);
   const [dxf, gcode] = await Promise.all([
     readProjectInput(directory, manifest.files.dxf?.path),
-    readProjectInput(directory, manifest.files.gcode?.path),
+    readProjectInput(directory, activeVersion?.gcodePath ?? manifest.files.gcode?.path),
   ]);
   return { slug, manifest, contents: { dxf, gcode } };
+}
+
+export async function createProjectVersion(slug: string, upload: ProjectUpload, transform: ProjectManifest["dxfTransform"], label?: string) {
+  validateUpload(upload);
+  const directory = projectDirectory(slug);
+  const manifest = await readManifest(slug);
+  const versions = manifest.versions ? [...manifest.versions] : manifest.files.gcode ? [{
+    id: "v1",
+    createdAt: manifest.updatedAt,
+    label: "Original",
+    gcodePath: manifest.files.gcode.path,
+    gcodeSha256: manifest.files.gcode.sha256,
+    dxfTransform: manifest.dxfTransform,
+  }] : [];
+  const nextVersionNumber = Math.max(0, ...versions.map((version) => Number(version.id.replace(/^v/, "")) || 0)) + 1;
+  const id = `v${nextVersionNumber}`;
+  const extension = path.extname(upload.name).toLowerCase() || ".gcode";
+  const safeExtension = /^\.[a-z0-9]{1,8}$/.test(extension) ? extension : ".gcode";
+  const relativePath = `versions/${id}/toolpath${safeExtension}`;
+  await mkdir(path.join(directory, "versions", id), { recursive: true });
+  await writeFile(path.join(directory, relativePath), upload.content, "utf8");
+  const version: ProjectVersion = {
+    id,
+    createdAt: new Date().toISOString(),
+    label: label?.trim() || `Version ${nextVersionNumber}`,
+    gcodePath: relativePath,
+    gcodeSha256: createHash("sha256").update(upload.content).digest("hex"),
+    dxfTransform: transform,
+  };
+  manifest.versions = [...versions, version];
+  manifest.currentVersion = id;
+  manifest.dxfTransform = transform;
+  manifest.updatedAt = version.createdAt;
+  await atomicJsonWrite(path.join(directory, "project.json"), manifest);
+  return loadProject(slug);
+}
+
+export async function switchProjectVersion(slug: string, versionId: string) {
+  const directory = projectDirectory(slug);
+  const manifest = await readManifest(slug);
+  const version = manifest.versions?.find((item) => item.id === versionId);
+  if (!version) throw new Error("Die ausgewählte Projektversion existiert nicht.");
+  manifest.currentVersion = version.id;
+  manifest.dxfTransform = version.dxfTransform;
+  manifest.updatedAt = new Date().toISOString();
+  await atomicJsonWrite(path.join(directory, "project.json"), manifest);
+  return loadProject(slug);
+}
+
+export async function deleteProjectVersion(slug: string, versionId: string) {
+  const directory = projectDirectory(slug);
+  const manifest = await readManifest(slug);
+  const version = manifest.versions?.find((item) => item.id === versionId);
+  if (!version) throw new Error("Die ausgewählte Projektversion existiert nicht.");
+
+  manifest.versions = manifest.versions?.filter((item) => item.id !== versionId) ?? [];
+  if (manifest.currentVersion === versionId) {
+    const fallback = manifest.versions.at(-1);
+    manifest.currentVersion = fallback?.id;
+    if (fallback) manifest.dxfTransform = fallback.dxfTransform;
+  }
+  manifest.updatedAt = new Date().toISOString();
+  await atomicJsonWrite(path.join(directory, "project.json"), manifest);
+
+  if (version.gcodePath.startsWith(`versions/${versionId}/`)) {
+    const versionFile = path.resolve(directory, version.gcodePath);
+    const versionDirectory = path.resolve(directory, "versions", versionId);
+    if (!versionFile.startsWith(`${versionDirectory}${path.sep}`)) throw new Error("Ungültiger Versionspfad.");
+    try { await unlink(versionFile); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    try { await rmdir(versionDirectory); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+  }
+  return loadProject(slug);
 }

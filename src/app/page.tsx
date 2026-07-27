@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import AddRounded from "@mui/icons-material/AddRounded";
 import ArchitectureRounded from "@mui/icons-material/ArchitectureRounded";
 import DeleteOutlineRounded from "@mui/icons-material/DeleteOutlineRounded";
+import DeleteForeverRounded from "@mui/icons-material/DeleteForeverRounded";
 import FolderOpenRounded from "@mui/icons-material/FolderOpenRounded";
 import MyLocationRounded from "@mui/icons-material/MyLocationRounded";
 import RestartAltRounded from "@mui/icons-material/RestartAltRounded";
@@ -11,13 +12,14 @@ import Rotate90DegreesCcwRounded from "@mui/icons-material/Rotate90DegreesCcwRou
 import Rotate90DegreesCwRounded from "@mui/icons-material/Rotate90DegreesCwRounded";
 import SaveRounded from "@mui/icons-material/SaveRounded";
 import SaveAsRounded from "@mui/icons-material/SaveAsRounded";
-import { Alert, Box, Button, Chip, Container, FormControl, InputLabel, MenuItem, Paper, Select, Slider, Stack, TextField, Typography } from "@mui/material";
+import { Alert, Box, Button, Chip, Container, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, FormControl, IconButton, InputLabel, MenuItem, Paper, Select, Slider, Stack, TextField, Typography } from "@mui/material";
 import { FileDropzone } from "@/components/FileDropzone";
 import { ToolpathViewer } from "@/components/ToolpathViewer";
+import { OffsetControls, OffsetDirection } from "@/components/OffsetControls";
 import { parseDxf, DxfResult } from "@/lib/dxf";
-import { parseGCode, GCodeResult } from "@/lib/gcode";
+import { offsetSelectedGCode, parseGCode, GCodeEditMode, GCodeResult } from "@/lib/gcode";
 import { Point, transformPaths, transformPoint } from "@/lib/geometry";
-import type { LoadedProject, ProjectSummary, SaveProjectRequest } from "@/lib/project";
+import type { LoadedProject, ProjectSummary, ProjectVersion, SaveProjectRequest } from "@/lib/project";
 
 type Loaded<T> = { name: string; content: string; data: T };
 type SaveState = "idle" | "dirty" | "saving" | "saved";
@@ -63,6 +65,12 @@ function HomeContent() {
   const [activeProject, setActiveProject] = useState<string | null>(null);
   const [projectName, setProjectName] = useState("");
   const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [selectedPathIndices, setSelectedPathIndices] = useState<number[]>([]);
+  const [versions, setVersions] = useState<ProjectVersion[]>([]);
+  const [currentVersion, setCurrentVersion] = useState("");
+  const [versionBusy, setVersionBusy] = useState(false);
+  const [versionToDelete, setVersionToDelete] = useState<ProjectVersion | null>(null);
+  const versionOperationRef = useRef(false);
 
   const transformedDxfPaths = useMemo(() => dxf ? transformPaths(dxf.data.paths, rotation, origin) : [], [dxf, rotation, origin]);
   const transformedReferencePoints = useMemo(() => dxf ? dxf.data.referencePoints.map((point) => transformPoint(point, rotation, origin)) : [], [dxf, rotation, origin]);
@@ -147,6 +155,8 @@ function HomeContent() {
       setSelectingOrigin(false);
       setActiveProject(project.slug);
       rememberProject(project.slug);
+      setVersions(project.manifest.versions ?? []);
+      setCurrentVersion(project.manifest.currentVersion ?? "");
       setSaveState("saved");
       setError(null);
     } catch (reason) {
@@ -171,7 +181,7 @@ function HomeContent() {
     try {
       const body: SaveProjectRequest = {
         name: projectName,
-        files: {
+        files: activeProject ? undefined : {
           dxf: dxf ? { name: dxf.name, content: dxf.content } : null,
           gcode: gcode ? { name: gcode.name, content: gcode.content } : null,
         },
@@ -182,10 +192,12 @@ function HomeContent() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const result = await response.json() as { slug?: string; error?: string };
+      const result = await response.json() as { slug?: string; manifest?: { versions?: ProjectVersion[]; currentVersion?: string }; error?: string };
       if (!response.ok || !result.slug) throw new Error(result.error ?? "Projekt konnte nicht gespeichert werden.");
       setActiveProject(result.slug);
       rememberProject(result.slug);
+      setVersions(result.manifest?.versions ?? versions);
+      setCurrentVersion(result.manifest?.currentVersion ?? currentVersion);
       setSaveState("saved");
       setError(null);
       await refreshProjects();
@@ -201,6 +213,106 @@ function HomeContent() {
     forgetProject();
     setProjectName("");
     setSaveState("idle");
+    setVersions([]);
+    setCurrentVersion("");
+  }
+
+  function applyLoadedVersion(project: LoadedProject) {
+    if (project.contents.gcode && project.manifest.files.gcode) {
+      setGcode({ name: project.manifest.files.gcode.originalName, content: project.contents.gcode, data: parseGCode(project.contents.gcode) });
+    }
+    setRotation(project.manifest.dxfTransform.rotationDegrees);
+    setOrigin(project.manifest.dxfTransform.origin);
+    setVersions(project.manifest.versions ?? []);
+    setCurrentVersion(project.manifest.currentVersion ?? "");
+    setSelectedPathIndices([]);
+    setSaveState("saved");
+  }
+
+  async function commitOffset(mode: GCodeEditMode, direction: OffsetDirection, rawValue: number) {
+    if (!gcode || !selectedPathIndices.length) return false;
+    if (!activeProject) {
+      setError("Bitte das Projekt zuerst speichern, bevor eine neue G-Code-Version angelegt wird.");
+      return false;
+    }
+    if (versionOperationRef.current) return false;
+    const amount = Math.abs(rawValue);
+    const offset = {
+      x: direction === "left" ? -amount : direction === "right" ? amount : 0,
+      y: direction === "down" ? -amount : direction === "up" ? amount : 0,
+    };
+    const content = offsetSelectedGCode(gcode.content, gcode.data, selectedPathIndices, offset, mode);
+    versionOperationRef.current = true;
+    setVersionBusy(true);
+    try {
+      const response = await fetch(`/api/projects/${encodeURIComponent(activeProject)}/versions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          gcode: { name: gcode.name, content },
+          dxfTransform: { rotationDegrees: rotation, origin },
+          label: `${mode === "translate" ? "Verschoben" : "Länge geändert"}: ${offset.x ? "X" : "Y"} ${(offset.x || offset.y).toLocaleString("de-DE")} mm`,
+        }),
+      });
+      const project = await response.json() as LoadedProject & { error?: string };
+      if (!response.ok) throw new Error(project.error);
+      applyLoadedVersion(project);
+      setError(null);
+      await refreshProjects();
+      return true;
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "G-Code-Version konnte nicht gespeichert werden.");
+      return false;
+    } finally {
+      versionOperationRef.current = false;
+      setVersionBusy(false);
+    }
+  }
+
+  async function switchVersion(versionId: string) {
+    if (!activeProject || versionOperationRef.current) return;
+    versionOperationRef.current = true;
+    setVersionBusy(true);
+    try {
+      const response = await fetch(`/api/projects/${encodeURIComponent(activeProject)}/versions`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ versionId }),
+      });
+      const project = await response.json() as LoadedProject & { error?: string };
+      if (!response.ok) throw new Error(project.error);
+      applyLoadedVersion(project);
+      setError(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Projektversion konnte nicht geladen werden.");
+    } finally {
+      versionOperationRef.current = false;
+      setVersionBusy(false);
+    }
+  }
+
+  async function deleteSelectedVersion() {
+    if (!activeProject || !versionToDelete || versionOperationRef.current) return;
+    versionOperationRef.current = true;
+    setVersionBusy(true);
+    try {
+      const response = await fetch(`/api/projects/${encodeURIComponent(activeProject)}/versions`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ versionId: versionToDelete.id }),
+      });
+      const project = await response.json() as LoadedProject & { error?: string };
+      if (!response.ok) throw new Error(project.error);
+      applyLoadedVersion(project);
+      setVersionToDelete(null);
+      setError(null);
+      await refreshProjects();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Projektversion konnte nicht gelöscht werden.");
+    } finally {
+      versionOperationRef.current = false;
+      setVersionBusy(false);
+    }
   }
 
   async function loadDxf(file: File) {
@@ -268,6 +380,70 @@ function HomeContent() {
 
           {error ? <Alert severity="error" onClose={() => setError(null)}>{error}</Alert> : null}
 
+          <Stack direction={{ xs: "column", lg: "row" }} spacing={2} sx={{ alignItems: "stretch" }}>
+            <Box sx={{ flex: 1, display: "grid", gridTemplateColumns: { xs: "1fr", xl: "repeat(2, minmax(0, 1fr))" }, gap: 2 }}>
+              <OffsetControls
+                title="Verschieben"
+                description="Bewegt Start und Ende der ausgewählten Bewegung gemeinsam."
+                enabled={selectedPathIndices.length > 0}
+                selectedCount={selectedPathIndices.length}
+                busy={versionBusy}
+                onCommit={(direction, value) => commitOffset("translate", direction, value)}
+              />
+              <OffsetControls
+                title="Verlängern / verkürzen"
+                description="Verschiebt nur den Endpunkt der ausgewählten Bewegung."
+                enabled={selectedPathIndices.length > 0}
+                selectedCount={selectedPathIndices.length}
+                busy={versionBusy}
+                onCommit={(direction, value) => commitOffset("resize", direction, value)}
+              />
+            </Box>
+            <Paper variant="outlined" sx={{ p: 2.5, minWidth: { lg: 280 } }}>
+              <Typography sx={{ fontWeight: 750, mb: 1 }}>Projektversion</Typography>
+              <FormControl size="small" fullWidth disabled={!activeProject || !versions.length || versionBusy}>
+                <InputLabel id="version-select-label">Stand auswählen</InputLabel>
+                <Select
+                  labelId="version-select-label"
+                  label="Stand auswählen"
+                  value={currentVersion}
+                  onChange={(event) => void switchVersion(event.target.value)}
+                  renderValue={(versionId) => {
+                    const version = versions.find((item) => item.id === versionId);
+                    return version ? `${version.label} · ${new Date(version.createdAt).toLocaleString("de-DE")}` : "";
+                  }}
+                >
+                  {versions.map((version) => (
+                    <MenuItem key={version.id} value={version.id} sx={{ gap: 1 }}>
+                      <Box sx={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{version.label} · {new Date(version.createdAt).toLocaleString("de-DE")}</Box>
+                      <IconButton
+                        size="small"
+                        color="error"
+                        aria-label={`${version.label} löschen`}
+                        onMouseDown={(event) => event.stopPropagation()}
+                        onClick={(event) => { event.preventDefault(); event.stopPropagation(); setVersionToDelete(version); }}
+                      >
+                        <DeleteForeverRounded fontSize="small" />
+                      </IconButton>
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>Jeder bestätigte Offset erzeugt einen unveränderlichen neuen Stand.</Typography>
+            </Paper>
+          </Stack>
+
+          <Dialog open={!!versionToDelete} onClose={() => { if (!versionBusy) setVersionToDelete(null); }}>
+            <DialogTitle>Delete project version?</DialogTitle>
+            <DialogContent>
+              <DialogContentText>„{versionToDelete?.label}“ wird aus der Versionshistorie entfernt. Diese Aktion kann nicht rückgängig gemacht werden.</DialogContentText>
+            </DialogContent>
+            <DialogActions>
+              <Button color="inherit" disabled={versionBusy} onClick={() => setVersionToDelete(null)}>Cancel</Button>
+              <Button color="error" variant="contained" disabled={versionBusy} onClick={() => void deleteSelectedVersion()}>Delete</Button>
+            </DialogActions>
+          </Dialog>
+
           {dxf ? (
             <Paper variant="outlined" sx={{ p: 2.5 }}>
               <Stack direction={{ xs: "column", lg: "row" }} spacing={3} sx={{ alignItems: { lg: "center" } }}>
@@ -311,6 +487,7 @@ function HomeContent() {
                 changeOrigin(dxf.data.referencePoints[index]);
                 setSelectingOrigin(false);
               }}
+              onSelectionChange={setSelectedPathIndices}
             />
           </Paper>
         </Stack>

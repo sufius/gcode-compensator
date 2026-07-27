@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { Box, Stack, Typography } from "@mui/material";
-import { Bounds, combineBounds, getBounds, Path } from "@/lib/geometry";
+import { Bounds, combineBounds, getBounds, Path, Point } from "@/lib/geometry";
 
 const WIDTH = 1000;
 const HEIGHT = 620;
@@ -46,7 +46,15 @@ function paddedBounds(bounds: Bounds): Bounds {
   };
 }
 
-export function ToolpathViewer({ dxfPaths, gcodePaths }: { dxfPaths: Path[]; gcodePaths: Path[] }) {
+type ViewerProps = {
+  dxfPaths: Path[];
+  gcodePaths: Path[];
+  referencePoints?: Point[];
+  selectingOrigin?: boolean;
+  onSelectOrigin?: (index: number) => void;
+};
+
+export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], selectingOrigin = false, onSelectOrigin }: ViewerProps) {
   const scene = useMemo(() => {
     const bounds = paddedBounds(combineBounds(getBounds(dxfPaths), getBounds(gcodePaths)));
     const dataWidth = Math.max(bounds.maxX - bounds.minX, 1);
@@ -77,6 +85,11 @@ export function ToolpathViewer({ dxfPaths, gcodePaths }: { dxfPaths: Path[]; gco
         })}
         {dxfPaths.map((path, index) => <path key={`dxf-${index}`} d={pathData(path, scene.project)} fill="none" stroke="#55d6be" strokeWidth="2.2" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />)}
         {gcodePaths.map((path, index) => <path key={`gcode-${index}`} d={pathData(path, scene.project)} fill="none" stroke={path.rapid ? "#8a96a8" : "#ffb454"} strokeOpacity={path.rapid ? 0.5 : 0.95} strokeDasharray={path.rapid ? "7 6" : undefined} strokeWidth={path.rapid ? 1.2 : 2} vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />)}
+        {selectingOrigin ? referencePoints.map((point, index) => {
+          const [cx, cy] = scene.project(point.x, point.y);
+          const select = () => onSelectOrigin?.(index);
+          return <circle key={`origin-${index}`} cx={cx} cy={cy} r={7} fill="#ff5d73" stroke="#fff" strokeWidth={2} role="button" tabIndex={0} aria-label={`Nullpunkt bei X ${formatTick(point.x)}, Y ${formatTick(point.y)} setzen`} onClick={select} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") select(); }} style={{ cursor: "crosshair" }} />;
+        }) : null}
       </svg>
       {isEmpty ? (
         <Stack sx={{ position: "absolute", inset: 0, pointerEvents: "none", alignItems: "center", justifyContent: "center" }} spacing={1}>
@@ -90,6 +103,7 @@ export function ToolpathViewer({ dxfPaths, gcodePaths }: { dxfPaths: Path[]; gco
         <Legend color="#8a96a8" label="Eilgang" dashed />
       </Stack>
       <Typography variant="caption" color="text.secondary" sx={{ position: "absolute", left: 18, bottom: 10 }}>Raster: {scene.step.toLocaleString("de-DE")} mm</Typography>
+      {selectingOrigin ? <Typography variant="caption" sx={{ position: "absolute", left: "50%", top: 16, transform: "translateX(-50%)", px: 1.5, py: 0.75, bgcolor: "#ff5d73", color: "#fff", borderRadius: 1, fontWeight: 750 }}>Eckpunkt als X0 / Y0 auswählen</Typography> : null}
     </Box>
   );
 }

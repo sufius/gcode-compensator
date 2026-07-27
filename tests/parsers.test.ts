@@ -3,6 +3,7 @@ import test from "node:test";
 import { parseDxf } from "../src/lib/dxf";
 import { parseGCode } from "../src/lib/gcode";
 import { getBounds } from "../src/lib/geometry";
+import { transformPaths, transformPoint } from "../src/lib/geometry";
 
 test("parst G-Code in absoluten und relativen Koordinaten", () => {
   const result = parseGCode("G21 G90\nG0 X10 Y10\nG1 X20 Y10\nG91\nG1 X5 Y-5");
@@ -64,6 +65,7 @@ ENDSEC
 EOF`;
   const result = parseDxf(dxf);
   assert.equal(result.entityCount, 3);
+  assert.equal(result.referencePoints.length, 4);
   assert.equal(result.paths[2].closed, true);
   assert.ok(result.paths[1].points.length > 50);
 });
@@ -99,4 +101,14 @@ ENDSEC
 EOF`;
   const result = parseDxf(dxf);
   assert.equal(result.paths[0].points[1].x, 25.4);
+  assert.equal(result.referencePoints[1].x, 25.4);
+});
+
+test("rotiert DXF-Pfade um den ausgewählten Nullpunkt", () => {
+  const origin = { x: 10, y: 5 };
+  const point = transformPoint({ x: 20, y: 5 }, 90, origin);
+  assert.ok(Math.abs(point.x) < 1e-10);
+  assert.equal(point.y, 10);
+  const paths = transformPaths([{ points: [origin, { x: 20, y: 5 }] }], 90, origin);
+  assert.deepEqual(paths[0].points[0], { x: 0, y: 0 });
 });

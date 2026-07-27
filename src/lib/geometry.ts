@@ -59,3 +59,19 @@ export function sampleArc(
     return { x: center.x + radius * Math.cos(angle), y: center.y + radius * Math.sin(angle) };
   });
 }
+
+export function transformPoint(point: Point, rotationDegrees: number, origin: Point | null = null): Point {
+  const radians = (rotationDegrees * Math.PI) / 180;
+  const cosine = Math.cos(radians);
+  const sine = Math.sin(radians);
+  const x = point.x - (origin?.x ?? 0);
+  const y = point.y - (origin?.y ?? 0);
+  return { x: x * cosine - y * sine, y: x * sine + y * cosine };
+}
+
+export function transformPaths(paths: Path[], rotationDegrees: number, origin: Point | null = null): Path[] {
+  return paths.map((path) => ({
+    ...path,
+    points: path.points.map((point) => transformPoint(point, rotationDegrees, origin)),
+  }));
+}

@@ -1,6 +1,6 @@
 import { Path, Point, sampleArc } from "./geometry";
 
-export type DxfResult = { paths: Path[]; entityCount: number };
+export type DxfResult = { paths: Path[]; referencePoints: Point[]; entityCount: number };
 type Pair = { code: number; value: string };
 
 function number(entity: Pair[], code: number, fallback = 0) {
@@ -22,7 +22,7 @@ function sampleBulge(start: Point, end: Point, bulge: number): Point[] {
   return sampleArc(center, radius, Math.atan2(start.y - center.y, start.x - center.x), Math.atan2(end.y - center.y, end.x - center.x), bulge < 0);
 }
 
-function lwPolyline(entity: Pair[]): Path | null {
+function lwPolyline(entity: Pair[]): { path: Path; vertices: Point[] } | null {
   const vertices: Array<Point & { bulge: number }> = [];
   for (let index = 0; index < entity.length; index += 1) {
     if (entity[index].code !== 10) continue;
@@ -45,7 +45,17 @@ function lwPolyline(entity: Pair[]): Path | null {
     const segment = sampleBulge(current, next, current.bulge);
     points.push(...(index === 0 ? segment : segment.slice(1)));
   }
-  return { points, closed };
+  return { path: { points, closed }, vertices: vertices.map(({ x, y }) => ({ x, y })) };
+}
+
+function uniquePoints(points: Point[]) {
+  const seen = new Set<string>();
+  return points.filter((point) => {
+    const key = `${point.x.toFixed(8)}:${point.y.toFixed(8)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 export function parseDxf(source: string): DxfResult {
@@ -64,6 +74,7 @@ export function parseDxf(source: string): DxfResult {
   const scale = unitScale[unitsCode] ?? 1;
 
   const paths: Path[] = [];
+  const referencePoints: Point[] = [];
   let entityCount = 0;
   for (let index = 0; index < pairs.length; index += 1) {
     if (pairs[index].code !== 0 || !["LINE", "LWPOLYLINE", "CIRCLE", "ARC"].includes(pairs[index].value)) continue;
@@ -75,16 +86,23 @@ export function parseDxf(source: string): DxfResult {
     entityCount += 1;
 
     if (type === "LINE") {
-      paths.push({ points: [{ x: number(entity, 10), y: number(entity, 20) }, { x: number(entity, 11), y: number(entity, 21) }] });
+      const points = [{ x: number(entity, 10), y: number(entity, 20) }, { x: number(entity, 11), y: number(entity, 21) }];
+      paths.push({ points });
+      referencePoints.push(...points.map((point) => ({ ...point })));
     } else if (type === "LWPOLYLINE") {
-      const path = lwPolyline(entity);
-      if (path) paths.push(path);
+      const polyline = lwPolyline(entity);
+      if (polyline) {
+        paths.push(polyline.path);
+        referencePoints.push(...polyline.vertices);
+      }
     } else {
       const center = { x: number(entity, 10), y: number(entity, 20) };
       const radius = number(entity, 40);
       const start = type === "CIRCLE" ? 0 : (number(entity, 50) * Math.PI) / 180;
       const end = type === "CIRCLE" ? Math.PI * 2 - 1e-10 : (number(entity, 51) * Math.PI) / 180;
-      paths.push({ points: sampleArc(center, radius, start, end), closed: type === "CIRCLE" });
+      const points = sampleArc(center, radius, start, end);
+      paths.push({ points, closed: type === "CIRCLE" });
+      if (type === "ARC") referencePoints.push({ ...points[0] }, { ...points[points.length - 1] });
     }
   }
   if (!paths.length) throw new Error("Keine unterstützten DXF-Elemente gefunden (LINE, LWPOLYLINE, ARC, CIRCLE).");
@@ -95,6 +113,10 @@ export function parseDxf(source: string): DxfResult {
         point.y *= scale;
       }
     }
+    for (const point of referencePoints) {
+      point.x *= scale;
+      point.y *= scale;
+    }
   }
-  return { paths, entityCount };
+  return { paths, referencePoints: uniquePoints(referencePoints), entityCount };
 }

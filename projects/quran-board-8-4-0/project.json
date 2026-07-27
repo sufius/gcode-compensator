@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "name": "quran_board_8.4.0",
+  "files": {
+    "dxf": {
+      "path": "inputs/contour.dxf",
+      "originalName": "quran_board_without_walls.dxf",
+      "sha256": "0a198c1e17a1e23b22a2dfc3ed358d0395f2bbd20e8f07533289b4cd0bca0a0f"
+    },
+    "gcode": {
+      "path": "inputs/toolpath.gcode",
+      "originalName": "quran_board_without_walls.gcode",
+      "sha256": "1584986dfc273789006ae16487d3fa86c56213ee61476877b4f4991696ee105b"
+    }
+  },
+  "dxfTransform": {
+    "rotationDegrees": 90,
+    "origin": {
+      "x": -244.365,
+      "y": 2.365
+    }
+  },
+  "view": {
+    "showGrid": true,
+    "showRapidMoves": true
+  },
+  "updatedAt": "2026-07-27T13:58:25.088Z"
+}

@@ -109,9 +109,10 @@ type ViewerProps = {
   onSelectionChange?: (pathIndices: number[]) => void;
   nodeMode?: boolean;
   onNodeSelectionChange?: (points: Point[]) => void;
+  fill?: boolean;
 };
 
-export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], selectingOrigin = false, onSelectOrigin, onSelectionChange, nodeMode = false, onNodeSelectionChange }: ViewerProps) {
+export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], selectingOrigin = false, onSelectOrigin, onSelectionChange, nodeMode = false, onNodeSelectionChange, fill = false }: ViewerProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const dragRef = useRef<Point | null>(null);
   const selectionStartRef = useRef<Point | null>(null);
@@ -355,7 +356,7 @@ export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], sel
   const isEmpty = !dxfPaths.length && !gcodePaths.length;
 
   return (
-    <Box sx={{ position: "relative", width: "100%", minHeight: 440, aspectRatio: `${WIDTH}/${HEIGHT}`, bgcolor: "#0a0e13", borderRadius: 2, overflow: "hidden", border: "1px solid", borderColor: "divider" }}>
+    <Box sx={{ position: "relative", width: "100%", height: fill ? "100%" : undefined, minHeight: fill ? 0 : 440, aspectRatio: fill ? undefined : `${WIDTH}/${HEIGHT}`, bgcolor: "#0a0e13", borderRadius: 2, overflow: "hidden", border: "1px solid", borderColor: "divider" }}>
       <svg
         ref={svgRef}
         viewBox={`0 0 ${WIDTH} ${HEIGHT}`}

@@ -3,9 +3,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import AddRounded from "@mui/icons-material/AddRounded";
 import ArchitectureRounded from "@mui/icons-material/ArchitectureRounded";
+import ChevronLeftRounded from "@mui/icons-material/ChevronLeftRounded";
+import ChevronRightRounded from "@mui/icons-material/ChevronRightRounded";
 import DeleteOutlineRounded from "@mui/icons-material/DeleteOutlineRounded";
 import DeleteForeverRounded from "@mui/icons-material/DeleteForeverRounded";
+import EditRounded from "@mui/icons-material/EditRounded";
+import FileUploadRounded from "@mui/icons-material/FileUploadRounded";
 import FolderOpenRounded from "@mui/icons-material/FolderOpenRounded";
+import HistoryRounded from "@mui/icons-material/HistoryRounded";
 import MyLocationRounded from "@mui/icons-material/MyLocationRounded";
 import PolylineRounded from "@mui/icons-material/PolylineRounded";
 import RestartAltRounded from "@mui/icons-material/RestartAltRounded";
@@ -13,7 +18,8 @@ import Rotate90DegreesCcwRounded from "@mui/icons-material/Rotate90DegreesCcwRou
 import Rotate90DegreesCwRounded from "@mui/icons-material/Rotate90DegreesCwRounded";
 import SaveRounded from "@mui/icons-material/SaveRounded";
 import SaveAsRounded from "@mui/icons-material/SaveAsRounded";
-import { Alert, Box, Button, Chip, Container, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, FormControl, IconButton, InputLabel, MenuItem, Paper, Select, Slider, Stack, TextField, Tooltip, Typography } from "@mui/material";
+import TuneRounded from "@mui/icons-material/TuneRounded";
+import { Alert, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, Divider, Drawer, FormControl, IconButton, InputLabel, MenuItem, Paper, Select, Slider, Stack, TextField, Tooltip, Typography } from "@mui/material";
 import { FileDropzone } from "@/components/FileDropzone";
 import { ToolpathViewer } from "@/components/ToolpathViewer";
 import { OffsetControls, OffsetDirection } from "@/components/OffsetControls";
@@ -25,6 +31,8 @@ import type { LoadedProject, ProjectSummary, ProjectVersion, SaveProjectRequest 
 type Loaded<T> = { name: string; content: string; data: T };
 type SaveState = "idle" | "dirty" | "saving" | "saved";
 const LAST_PROJECT_KEY = "gcode-compensator:last-project";
+const DRAWER_WIDTH = 400;
+const MINI_DRAWER_WIDTH = 72;
 
 function rememberProject(slug: string) {
   try { window.localStorage.setItem(LAST_PROJECT_KEY, slug); } catch { /* Storage kann im privaten Modus gesperrt sein. */ }
@@ -73,6 +81,11 @@ function HomeContent() {
   const [currentVersion, setCurrentVersion] = useState("");
   const [versionBusy, setVersionBusy] = useState(false);
   const [versionToDelete, setVersionToDelete] = useState<ProjectVersion | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [editProjectOpen, setEditProjectOpen] = useState(false);
+  const [projectNameDraft, setProjectNameDraft] = useState("");
+  const [deleteProjectOpen, setDeleteProjectOpen] = useState(false);
+  const [projectBusy, setProjectBusy] = useState(false);
   const versionOperationRef = useRef(false);
 
   const transformedDxfPaths = useMemo(() => dxf ? transformPaths(dxf.data.paths, rotation, origin) : [], [dxf, rotation, origin]);
@@ -207,6 +220,48 @@ function HomeContent() {
     } catch (reason) {
       setSaveState("dirty");
       setError(reason instanceof Error ? reason.message : "Projekt konnte nicht gespeichert werden.");
+    }
+  }
+
+  async function renameCurrentProject() {
+    if (!activeProject || !projectNameDraft.trim()) return;
+    setProjectBusy(true);
+    try {
+      const response = await fetch(`/api/projects/${encodeURIComponent(activeProject)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: projectNameDraft.trim() } satisfies SaveProjectRequest),
+      });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(result.error);
+      setProjectName(projectNameDraft.trim());
+      setEditProjectOpen(false);
+      setSaveState("saved");
+      setError(null);
+      await refreshProjects();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Projektname konnte nicht geändert werden.");
+    } finally {
+      setProjectBusy(false);
+    }
+  }
+
+  async function deleteCurrentProject() {
+    if (!activeProject) return;
+    setProjectBusy(true);
+    try {
+      const response = await fetch(`/api/projects/${encodeURIComponent(activeProject)}`, { method: "DELETE" });
+      if (!response.ok) {
+        const result = await response.json() as { error?: string };
+        throw new Error(result.error ?? "Projekt konnte nicht gelöscht werden.");
+      }
+      setDeleteProjectOpen(false);
+      newProject();
+      await refreshProjects();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Projekt konnte nicht gelöscht werden.");
+    } finally {
+      setProjectBusy(false);
     }
   }
 
@@ -349,166 +404,144 @@ function HomeContent() {
   }
 
   return (
-    <Box component="main" sx={{ minHeight: "100vh", background: "radial-gradient(circle at 15% -10%, #283444 0, #0d1117 35%)", py: { xs: 4, md: 7 } }}>
-      <Container maxWidth="xl">
-        <Stack spacing={4}>
-          <Stack direction={{ xs: "column", md: "row" }} spacing={2} sx={{ justifyContent: "space-between", alignItems: { md: "flex-end" } }}>
-            <Box>
-              <Stack direction="row" spacing={1.2} sx={{ alignItems: "center", mb: 1.2 }}>
-                <ArchitectureRounded color="primary" />
-                <Typography variant="overline" color="primary.main" sx={{ fontWeight: 800, letterSpacing: "0.16em" }}>CNC PATH INSPECTOR</Typography>
-              </Stack>
-              <Typography variant="h3" component="h1">Werkstück und Werkzeugweg</Typography>
-              <Typography color="text.secondary" sx={{ mt: 1, maxWidth: 700 }}>DXF-Konturen und G-Code-Fräsbahnen gemeinsam prüfen – automatisch skaliert und vollständig lokal im Browser verarbeitet.</Typography>
-            </Box>
-            {(dxf || gcode) ? <Button startIcon={<DeleteOutlineRounded />} color="inherit" onClick={clearView}>Ansicht leeren</Button> : null}
-          </Stack>
+    <Box sx={{ display: "flex", minHeight: "100vh", bgcolor: "background.default", background: "radial-gradient(circle at 15% -10%, #283444 0, #0d1117 35%)" }}>
+      <Drawer
+        variant="permanent"
+        open={drawerOpen}
+        sx={{
+          width: drawerOpen ? DRAWER_WIDTH : MINI_DRAWER_WIDTH,
+          flexShrink: 0,
+          transition: (theme) => theme.transitions.create("width"),
+          "& .MuiDrawer-paper": {
+            width: drawerOpen ? DRAWER_WIDTH : MINI_DRAWER_WIDTH,
+            boxSizing: "border-box",
+            overflowX: "hidden",
+            transition: (theme) => theme.transitions.create("width"),
+            borderColor: "divider",
+          },
+        }}
+      >
+        <Stack direction="row" sx={{ height: 64, px: drawerOpen ? 2 : 1, alignItems: "center", justifyContent: drawerOpen ? "space-between" : "center", flexShrink: 0 }}>
+          {drawerOpen ? <Stack direction="row" spacing={1} sx={{ alignItems: "center", minWidth: 0 }}><ArchitectureRounded color="primary" /><Typography noWrap sx={{ fontWeight: 800 }}>CNC Path Inspector</Typography></Stack> : null}
+          <IconButton aria-label={drawerOpen ? "Seitenleiste einklappen" : "Seitenleiste ausklappen"} onClick={() => setDrawerOpen((value) => !value)}>
+            {drawerOpen ? <ChevronLeftRounded /> : <ChevronRightRounded />}
+          </IconButton>
+        </Stack>
+        <Divider />
 
-          <Paper variant="outlined" sx={{ p: 2.5 }}>
-            <Stack direction={{ xs: "column", md: "row" }} spacing={2} sx={{ alignItems: { md: "center" } }}>
-              <Box sx={{ minWidth: { md: 280 }, flex: 1 }}>
-                <Typography sx={{ fontWeight: 750 }}>Arbeitsprojekt</Typography>
-                <Typography variant="body2" color="text.secondary">Dateien und Einstellungen werden im Repository unter projects/ gespeichert.</Typography>
-              </Box>
-              <FormControl size="small" sx={{ minWidth: 220 }}>
+        {!drawerOpen ? (
+          <Stack spacing={1} sx={{ alignItems: "center", py: 2 }}>
+            {[
+              { label: "Projekte", icon: <FolderOpenRounded /> },
+              { label: "Dateien", icon: <FileUploadRounded /> },
+              { label: "DXF ausrichten", icon: <TuneRounded /> },
+              { label: "Versionen", icon: <HistoryRounded /> },
+            ].map((item) => <Tooltip key={item.label} title={item.label} placement="right"><IconButton aria-label={item.label} onClick={() => setDrawerOpen(true)}>{item.icon}</IconButton></Tooltip>)}
+          </Stack>
+        ) : (
+          <Stack spacing={2.5} sx={{ p: 2, overflowY: "auto", overflowX: "hidden" }}>
+            <Box>
+              <Typography variant="overline" color="text.secondary">Arbeitsprojekt</Typography>
+              <FormControl size="small" fullWidth sx={{ mt: 1 }}>
                 <InputLabel id="project-select-label">Vorhandenes Projekt</InputLabel>
                 <Select labelId="project-select-label" label="Vorhandenes Projekt" value={activeProject ?? ""} onChange={(event) => { if (event.target.value) void openProject(event.target.value); }}>
                   <MenuItem value=""><em>Keines ausgewählt</em></MenuItem>
                   {projects.map((project) => <MenuItem key={project.slug} value={project.slug}>{project.name}</MenuItem>)}
                 </Select>
               </FormControl>
-              <TextField label="Projektname" size="small" value={projectName} onChange={(event) => { setProjectName(event.target.value); setSaveState("dirty"); }} sx={{ minWidth: 220 }} />
-              <Button startIcon={<AddRounded />} color="inherit" onClick={newProject}>Neu</Button>
-              {activeProject ? <Button startIcon={<SaveAsRounded />} color="inherit" onClick={() => { setActiveProject(null); setProjectName(`${projectName} Kopie`); setSaveState("dirty"); }}>Speichern unter</Button> : null}
-              <Button variant="contained" startIcon={activeProject ? <SaveRounded /> : <FolderOpenRounded />} disabled={saveState === "saving"} onClick={() => void saveCurrentProject()}>
-                {saveState === "saving" ? "Speichert …" : activeProject ? "Speichern" : "Projekt anlegen"}
-              </Button>
-              <Chip size="small" variant="outlined" color={saveState === "dirty" ? "warning" : saveState === "saved" ? "success" : "default"} label={saveState === "saving" ? "Speichert …" : saveState === "dirty" ? "Ungespeichert" : saveState === "saved" ? "Gespeichert" : "Noch nicht gespeichert"} />
-            </Stack>
-          </Paper>
-
-          <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
-            <Box sx={{ flex: 1 }}><FileDropzone title="DXF-Kontur" description=".dxf hier ablegen" accept=".dxf,application/dxf" fileName={dxf?.name} accent="#55d6be" onFile={loadDxf} /></Box>
-            <Box sx={{ flex: 1 }}><FileDropzone title="G-Code-Fräsbahn" description=".nc, .gcode, .tap oder .cnc hier ablegen" accept=".nc,.gcode,.tap,.cnc,.ngc,text/plain" fileName={gcode?.name} accent="#ffb454" onFile={(file) => loadFile(file, parseGCode, setGcode)} /></Box>
-          </Stack>
-
-          {error ? <Alert severity="error" onClose={() => setError(null)}>{error}</Alert> : null}
-
-          <Stack direction={{ xs: "column", lg: "row" }} spacing={2} sx={{ alignItems: "stretch" }}>
-            <Box sx={{ flex: 1 }}>
-              <OffsetControls
-                title={nodeMode ? "Knoten verschieben" : "Verschieben"}
-                description={nodeMode ? "Addiert den Offset auf jeden ausgewählten Koordinatenknoten." : "Bewegt Start und Ende der ausgewählten Bewegung gemeinsam."}
-                selectionNoun={nodeMode ? "Knoten" : "G-Code-Bewegungen"}
-                enabled={(nodeMode ? selectedNodes.length : selectedPathIndices.length) > 0}
-                zEnabled={!nodeMode && selectedPathIndices.some((index) => gcode?.data.paths[index]?.gcode?.hasExplicitZ)}
-                selectedCount={nodeMode ? selectedNodes.length : selectedPathIndices.length}
-                busy={versionBusy}
-                onCommit={commitOffset}
-              />
+              {activeProject ? (
+                <Stack direction="row" spacing={0.5} sx={{ alignItems: "center", mt: 1.5 }}>
+                  <Typography noWrap sx={{ flex: 1, fontWeight: 750 }}>{projectName}</Typography>
+                  <Tooltip title="Projektname bearbeiten"><IconButton size="small" aria-label="Projektname bearbeiten" onClick={() => { setProjectNameDraft(projectName); setEditProjectOpen(true); }}><EditRounded fontSize="small" /></IconButton></Tooltip>
+                  <Tooltip title="Projekt vollständig löschen"><IconButton size="small" color="error" aria-label="Projekt vollständig löschen" onClick={() => setDeleteProjectOpen(true)}><DeleteForeverRounded fontSize="small" /></IconButton></Tooltip>
+                </Stack>
+              ) : <TextField label="Projektname" size="small" fullWidth value={projectName} onChange={(event) => { setProjectName(event.target.value); setSaveState("dirty"); }} sx={{ mt: 1.5 }} />}
+              <Stack direction="row" spacing={1} useFlexGap sx={{ mt: 1.5, flexWrap: "wrap" }}>
+                <Button size="small" startIcon={<AddRounded />} color="inherit" onClick={newProject}>Neu</Button>
+                {activeProject ? <Button size="small" startIcon={<SaveAsRounded />} color="inherit" onClick={() => { setActiveProject(null); setProjectName(`${projectName} Kopie`); setSaveState("dirty"); }}>Kopie</Button> : null}
+                <Button size="small" variant="contained" startIcon={activeProject ? <SaveRounded /> : <FolderOpenRounded />} disabled={saveState === "saving"} onClick={() => void saveCurrentProject()}>{saveState === "saving" ? "Speichert …" : activeProject ? "Speichern" : "Anlegen"}</Button>
+              </Stack>
+              <Chip sx={{ mt: 1.5 }} size="small" variant="outlined" color={saveState === "dirty" ? "warning" : saveState === "saved" ? "success" : "default"} label={saveState === "saving" ? "Speichert …" : saveState === "dirty" ? "Ungespeichert" : saveState === "saved" ? "Gespeichert" : "Noch nicht gespeichert"} />
             </Box>
-            <Paper variant="outlined" sx={{ p: 2.5, minWidth: { lg: 280 } }}>
-              <Typography sx={{ fontWeight: 750, mb: 1 }}>Projektversion</Typography>
-              <FormControl size="small" fullWidth disabled={!activeProject || !versions.length || versionBusy}>
+
+            <Divider />
+            <Box>
+              <Typography variant="overline" color="text.secondary">Dateien</Typography>
+              <Stack spacing={1.25} sx={{ mt: 1 }}>
+                <FileDropzone title="DXF-Kontur" description=".dxf auswählen" accept=".dxf,application/dxf" fileName={dxf?.name} accent="#55d6be" onFile={loadDxf} />
+                <FileDropzone title="G-Code" description=".nc, .gcode, .tap oder .cnc" accept=".nc,.gcode,.tap,.cnc,.ngc,text/plain" fileName={gcode?.name} accent="#ffb454" onFile={(file) => loadFile(file, parseGCode, setGcode)} />
+              </Stack>
+              {(dxf || gcode) ? <Button sx={{ mt: 1 }} size="small" startIcon={<DeleteOutlineRounded />} color="inherit" onClick={clearView}>Ansicht leeren</Button> : null}
+            </Box>
+
+            {dxf ? <><Divider /><Box>
+              <Typography variant="overline" color="text.secondary">DXF ausrichten</Typography>
+              <Stack direction="row" spacing={1} sx={{ alignItems: "center", mt: 1 }}>
+                <IconButton aria-label="90 Grad gegen den Uhrzeigersinn drehen" onClick={() => changeRotation(rotation - 90)}><Rotate90DegreesCcwRounded /></IconButton>
+                <Slider min={-180} max={180} step={1} value={Math.max(-180, Math.min(180, rotation))} onChange={(_, value) => changeRotation(value as number)} aria-label="DXF-Rotation" />
+                <IconButton aria-label="90 Grad im Uhrzeigersinn drehen" onClick={() => changeRotation(rotation + 90)}><Rotate90DegreesCwRounded /></IconButton>
+                <TextField label="°" type="number" size="small" value={rotation} onChange={(event) => changeRotation(Number(event.target.value) || 0)} slotProps={{ htmlInput: { step: 1 } }} sx={{ width: 78 }} />
+              </Stack>
+              <Button fullWidth sx={{ mt: 1.5 }} variant={selectingOrigin ? "contained" : "outlined"} color={selectingOrigin ? "warning" : "secondary"} startIcon={<MyLocationRounded />} disabled={!dxf.data.referencePoints.length} onClick={() => setSelectingOrigin((value) => !value)}>{selectingOrigin ? "Auswahl abbrechen" : "Nullpunkt auswählen"}</Button>
+              {origin ? <Button fullWidth sx={{ mt: 0.5 }} color="inherit" startIcon={<RestartAltRounded />} onClick={() => { changeOrigin(null); setSelectingOrigin(false); }}>Nullpunkt zurücksetzen</Button> : null}
+              {origin ? <Typography variant="caption" color="secondary.main">X0/Y0: {origin.x.toLocaleString("de-DE", { maximumFractionDigits: 3 })} / {origin.y.toLocaleString("de-DE", { maximumFractionDigits: 3 })} mm</Typography> : null}
+            </Box></> : null}
+
+            <Divider />
+            <Box>
+              <Typography variant="overline" color="text.secondary">Projektversion</Typography>
+              <FormControl size="small" fullWidth disabled={!activeProject || !versions.length || versionBusy} sx={{ mt: 1 }}>
                 <InputLabel id="version-select-label">Stand auswählen</InputLabel>
-                <Select
-                  labelId="version-select-label"
-                  label="Stand auswählen"
-                  value={currentVersion}
-                  onChange={(event) => void switchVersion(event.target.value)}
-                  renderValue={(versionId) => {
-                    const version = versions.find((item) => item.id === versionId);
-                    return version ? `${version.label} · ${new Date(version.createdAt).toLocaleString("de-DE")}` : "";
-                  }}
-                >
-                  {versions.map((version) => (
-                    <MenuItem key={version.id} value={version.id} sx={{ gap: 1 }}>
-                      <Box sx={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{version.label} · {new Date(version.createdAt).toLocaleString("de-DE")}</Box>
-                      <IconButton
-                        size="small"
-                        color="error"
-                        aria-label={`${version.label} löschen`}
-                        onMouseDown={(event) => event.stopPropagation()}
-                        onClick={(event) => { event.preventDefault(); event.stopPropagation(); setVersionToDelete(version); }}
-                      >
-                        <DeleteForeverRounded fontSize="small" />
-                      </IconButton>
-                    </MenuItem>
-                  ))}
+                <Select labelId="version-select-label" label="Stand auswählen" value={currentVersion} onChange={(event) => void switchVersion(event.target.value)} renderValue={(versionId) => versions.find((item) => item.id === versionId)?.label ?? ""}>
+                  {versions.map((version) => <MenuItem key={version.id} value={version.id} sx={{ gap: 1 }}>
+                    <Box sx={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{version.label} · {new Date(version.createdAt).toLocaleString("de-DE")}</Box>
+                    <IconButton size="small" color="error" aria-label={`${version.label} löschen`} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { event.preventDefault(); event.stopPropagation(); setVersionToDelete(version); }}><DeleteForeverRounded fontSize="small" /></IconButton>
+                  </MenuItem>)}
                 </Select>
               </FormControl>
-              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>Jeder bestätigte Offset erzeugt einen unveränderlichen neuen Stand.</Typography>
-            </Paper>
+            </Box>
           </Stack>
+        )}
+      </Drawer>
 
-          <Dialog open={!!versionToDelete} onClose={() => { if (!versionBusy) setVersionToDelete(null); }}>
-            <DialogTitle>Delete project version?</DialogTitle>
-            <DialogContent>
-              <DialogContentText>„{versionToDelete?.label}“ wird aus der Versionshistorie entfernt. Diese Aktion kann nicht rückgängig gemacht werden.</DialogContentText>
-            </DialogContent>
-            <DialogActions>
-              <Button color="inherit" disabled={versionBusy} onClick={() => setVersionToDelete(null)}>Cancel</Button>
-              <Button color="error" variant="contained" disabled={versionBusy} onClick={() => void deleteSelectedVersion()}>Delete</Button>
-            </DialogActions>
-          </Dialog>
-
-          {dxf ? (
-            <Paper variant="outlined" sx={{ p: 2.5 }}>
-              <Stack direction={{ xs: "column", lg: "row" }} spacing={3} sx={{ alignItems: { lg: "center" } }}>
-                <Box sx={{ flex: 1, minWidth: 240 }}>
-                  <Typography sx={{ fontWeight: 750 }}>DXF drehen</Typography>
-                  <Stack direction="row" spacing={2} sx={{ alignItems: "center", mt: 1 }}>
-                    <Button aria-label="90 Grad gegen den Uhrzeigersinn drehen" variant="outlined" onClick={() => changeRotation(rotation - 90)}><Rotate90DegreesCcwRounded /></Button>
-                    <Slider min={-180} max={180} step={1} value={Math.max(-180, Math.min(180, rotation))} onChange={(_, value) => changeRotation(value as number)} aria-label="DXF-Rotation" />
-                    <Button aria-label="90 Grad im Uhrzeigersinn drehen" variant="outlined" onClick={() => changeRotation(rotation + 90)}><Rotate90DegreesCwRounded /></Button>
-                    <TextField label="Winkel" type="number" size="small" value={rotation} onChange={(event) => changeRotation(Number(event.target.value) || 0)} slotProps={{ htmlInput: { step: 1 } }} sx={{ width: 110 }} />
-                  </Stack>
-                </Box>
-                <Stack direction="row" spacing={1.5} useFlexGap sx={{ flexWrap: "wrap", alignItems: "center" }}>
-                  <Button variant={selectingOrigin ? "contained" : "outlined"} color={selectingOrigin ? "warning" : "secondary"} startIcon={<MyLocationRounded />} disabled={!dxf.data.referencePoints.length} onClick={() => setSelectingOrigin((value) => !value)}>
-                    {selectingOrigin ? "Auswahl abbrechen" : "Nullpunkt auswählen"}
-                  </Button>
-                  {origin ? <Button color="inherit" startIcon={<RestartAltRounded />} onClick={() => { changeOrigin(null); setSelectingOrigin(false); }}>Nullpunkt zurücksetzen</Button> : null}
-                  {origin ? <Chip label={`X0/Y0: ${origin.x.toLocaleString("de-DE", { maximumFractionDigits: 3 })} / ${origin.y.toLocaleString("de-DE", { maximumFractionDigits: 3 })} mm`} color="secondary" variant="outlined" /> : null}
-                </Stack>
-              </Stack>
-              {selectingOrigin ? <Alert severity="info" sx={{ mt: 2 }}>Klicke in der Vorschau auf einen roten Eckpunkt. Dieser Punkt wird anschließend auf X0 / Y0 verschoben.</Alert> : null}
-            </Paper>
-          ) : null}
-
-          <Paper elevation={8} sx={{ p: { xs: 1.5, md: 2.5 }, border: "1px solid", borderColor: "divider" }}>
-            <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ justifyContent: "space-between", alignItems: { sm: "center" }, mb: 2 }}>
-              <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-                <Typography variant="h6" sx={{ fontWeight: 750 }}>2D-Vorschau</Typography>
-                <Tooltip title={nodeMode ? "Knotenwerkzeug deaktivieren" : "Knotenwerkzeug aktivieren"}>
-                  <IconButton color={nodeMode ? "primary" : "default"} aria-pressed={nodeMode} aria-label="Knotenwerkzeug" onClick={() => setNodeMode((value) => !value)} sx={{ bgcolor: nodeMode ? "primary.main" : "transparent", color: nodeMode ? "primary.contrastText" : undefined }}>
-                    <PolylineRounded />
-                  </IconButton>
-                </Tooltip>
-              </Stack>
-              <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
-                {dxf ? <Chip size="small" label={`${dxf.data.entityCount} DXF-Elemente`} color="secondary" variant="outlined" /> : null}
-                {gcode ? <Chip size="small" label={`${gcode.data.paths.filter((path) => !path.rapid).length} Fräsbewegungen`} color="primary" variant="outlined" /> : null}
-                <Chip size="small" label="Einheit: mm" variant="outlined" />
-              </Stack>
-            </Stack>
-            <ToolpathViewer
-              dxfPaths={transformedDxfPaths}
-              gcodePaths={gcode?.data.paths ?? []}
-              referencePoints={transformedReferencePoints}
-              selectingOrigin={selectingOrigin}
-              onSelectOrigin={(index) => {
-                if (!dxf) return;
-                changeOrigin(dxf.data.referencePoints[index]);
-                setSelectingOrigin(false);
-              }}
-              onSelectionChange={setSelectedPathIndices}
-              nodeMode={nodeMode}
-              onNodeSelectionChange={setSelectedNodes}
-            />
-          </Paper>
+      <Box component="main" sx={{ minWidth: 0, width: `calc(100vw - ${drawerOpen ? DRAWER_WIDTH : MINI_DRAWER_WIDTH}px)`, height: "100vh", p: 2, display: "flex", flexDirection: "column", gap: 2, overflow: "hidden", transition: (theme) => theme.transitions.create("width") }}>
+        <Stack direction="row" spacing={2} sx={{ minHeight: 48, alignItems: "center", justifyContent: "space-between" }}>
+          <Box sx={{ minWidth: 0 }}>
+            <Typography variant="h5" component="h1" noWrap sx={{ fontWeight: 750 }}>{projectName || "Werkstück und Werkzeugweg"}</Typography>
+            <Typography variant="body2" color="text.secondary" noWrap>Koordinatensystem und Jog-Steuerung</Typography>
+          </Box>
+          <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+            {dxf ? <Chip size="small" label={`${dxf.data.entityCount} DXF`} color="secondary" variant="outlined" /> : null}
+            {gcode ? <Chip size="small" label={`${gcode.data.paths.filter((path) => !path.rapid).length} Fräsbewegungen`} color="primary" variant="outlined" /> : null}
+            <Tooltip title={nodeMode ? "Knotenwerkzeug deaktivieren" : "Knotenwerkzeug aktivieren"}><IconButton color={nodeMode ? "primary" : "default"} aria-pressed={nodeMode} aria-label="Knotenwerkzeug" onClick={() => setNodeMode((value) => !value)}><PolylineRounded /></IconButton></Tooltip>
+          </Stack>
         </Stack>
-      </Container>
+        {error ? <Alert severity="error" onClose={() => setError(null)}>{error}</Alert> : null}
+        {selectingOrigin ? <Alert severity="info">Klicke im Koordinatensystem auf einen roten Eckpunkt.</Alert> : null}
+        <Box sx={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: { xs: "1fr", lg: "minmax(0, 1fr) minmax(310px, 26vw)" }, gap: 2, overflow: { xs: "auto", lg: "hidden" } }}>
+          <Paper elevation={8} sx={{ minHeight: { xs: 500, lg: 0 }, p: 1.5, border: "1px solid", borderColor: "divider", display: "flex", flexDirection: "column" }}>
+            <ToolpathViewer fill dxfPaths={transformedDxfPaths} gcodePaths={gcode?.data.paths ?? []} referencePoints={transformedReferencePoints} selectingOrigin={selectingOrigin} onSelectOrigin={(index) => { if (!dxf) return; changeOrigin(dxf.data.referencePoints[index]); setSelectingOrigin(false); }} onSelectionChange={setSelectedPathIndices} nodeMode={nodeMode} onNodeSelectionChange={setSelectedNodes} />
+          </Paper>
+          <Box sx={{ minHeight: { xs: 480, lg: 0 } }}>
+            <OffsetControls compact title={nodeMode ? "Knoten verschieben" : "Jog"} description={nodeMode ? "Addiert den Offset auf jeden ausgewählten Koordinatenknoten." : "Bewegt Start und Ende der ausgewählten Bewegung gemeinsam."} selectionNoun={nodeMode ? "Knoten" : "G-Code-Bewegungen"} enabled={(nodeMode ? selectedNodes.length : selectedPathIndices.length) > 0} zEnabled={!nodeMode && selectedPathIndices.some((index) => gcode?.data.paths[index]?.gcode?.hasExplicitZ)} selectedCount={nodeMode ? selectedNodes.length : selectedPathIndices.length} busy={versionBusy} onCommit={commitOffset} />
+          </Box>
+        </Box>
+      </Box>
+
+      <Dialog open={editProjectOpen} onClose={() => { if (!projectBusy) setEditProjectOpen(false); }} fullWidth maxWidth="xs">
+        <DialogTitle>Projektname bearbeiten</DialogTitle>
+        <DialogContent><TextField autoFocus fullWidth label="Projektname" value={projectNameDraft} onChange={(event) => setProjectNameDraft(event.target.value)} sx={{ mt: 1 }} /></DialogContent>
+        <DialogActions><Button color="inherit" disabled={projectBusy} onClick={() => setEditProjectOpen(false)}>Abbrechen</Button><Button variant="contained" disabled={projectBusy || !projectNameDraft.trim()} onClick={() => void renameCurrentProject()}>Speichern</Button></DialogActions>
+      </Dialog>
+      <Dialog open={deleteProjectOpen} onClose={() => { if (!projectBusy) setDeleteProjectOpen(false); }} fullWidth maxWidth="sm">
+        <DialogTitle>Projekt endgültig löschen?</DialogTitle>
+        <DialogContent><Alert severity="warning" sx={{ mb: 2 }}>Diese Aktion kann nicht rückgängig gemacht werden.</Alert><DialogContentText>Das Projekt „{projectName}“ und der komplette Ordner <strong>projects/{activeProject}</strong> werden einschließlich aller Eingabedateien und Versionen dauerhaft gelöscht.</DialogContentText></DialogContent>
+        <DialogActions><Button color="inherit" disabled={projectBusy} onClick={() => setDeleteProjectOpen(false)}>Abbrechen</Button><Button color="error" variant="contained" startIcon={<DeleteForeverRounded />} disabled={projectBusy} onClick={() => void deleteCurrentProject()}>{projectBusy ? "Löscht …" : "Projekt und Ordner löschen"}</Button></DialogActions>
+      </Dialog>
+      <Dialog open={!!versionToDelete} onClose={() => { if (!versionBusy) setVersionToDelete(null); }}>
+        <DialogTitle>Projektversion löschen?</DialogTitle><DialogContent><DialogContentText>„{versionToDelete?.label}“ wird aus der Versionshistorie entfernt. Diese Aktion kann nicht rückgängig gemacht werden.</DialogContentText></DialogContent>
+        <DialogActions><Button color="inherit" disabled={versionBusy} onClick={() => setVersionToDelete(null)}>Abbrechen</Button><Button color="error" variant="contained" disabled={versionBusy} onClick={() => void deleteSelectedVersion()}>Löschen</Button></DialogActions>
+      </Dialog>
     </Box>
   );
 }

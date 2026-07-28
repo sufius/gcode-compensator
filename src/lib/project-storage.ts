@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, rename, rmdir, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, rmdir, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   LoadedProject,
@@ -158,6 +158,14 @@ export async function loadProject(slug: string): Promise<LoadedProject> {
     readProjectInput(directory, activeVersion?.gcodePath ?? manifest.files.gcode?.path),
   ]);
   return { slug, manifest, contents: { dxf, gcode } };
+}
+
+export async function deleteProject(slug: string) {
+  const directory = projectDirectory(slug);
+  // Erst das Manifest lesen: So werden nur valide, tatsächlich existierende
+  // Projektordner unterhalb von PROJECTS_ROOT gelöscht.
+  await readManifest(slug);
+  await rm(directory, { recursive: true, force: false });
 }
 
 export async function createProjectVersion(slug: string, upload: ProjectUpload, transform: ProjectManifest["dxfTransform"], label?: string) {

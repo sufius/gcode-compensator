@@ -52,7 +52,7 @@ const StepButton = styled("button")(({ theme }) => ({
 
 type Values = Record<OffsetDirection, number>;
 
-function DirectionField({ direction, label, icon, value, min, max, gridColumn, gridRow, enabled, busy, onChange, onCommit }: {
+function DirectionField({ direction, label, icon, value, min, max, gridColumn, gridRow, enabled, busy, compact, onChange, onCommit }: {
   direction: OffsetDirection;
   label: string;
   icon: React.ReactNode;
@@ -63,6 +63,7 @@ function DirectionField({ direction, label, icon, value, min, max, gridColumn, g
   gridRow: number;
   enabled: boolean;
   busy: boolean;
+  compact?: boolean;
   onChange: (direction: OffsetDirection, value: number) => void;
   onCommit: (direction: OffsetDirection, value: number | null) => void;
 }) {
@@ -71,7 +72,7 @@ function DirectionField({ direction, label, icon, value, min, max, gridColumn, g
 
   return (
     <Box
-      sx={{ gridColumn, gridRow }}
+      sx={{ gridColumn, gridRow, justifySelf: compact ? "center" : "stretch" }}
       onBlurCapture={(event) => {
         if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
         onCommit(direction, currentValueRef.current);
@@ -84,6 +85,11 @@ function DirectionField({ direction, label, icon, value, min, max, gridColumn, g
     >
       <Stack direction="row" spacing={0.75} sx={{ alignItems: "center", mb: 0.5, justifyContent: "center" }}>{icon}<Typography variant="caption" sx={{ fontWeight: 750 }}>{label}</Typography></Stack>
       <FieldRoot
+        sx={{
+          width: compact ? 96 : "100%",
+          "& button": compact ? { width: 26 } : undefined,
+          "& input": compact ? { width: 44, px: 0.5 } : undefined,
+        }}
         value={value}
         min={min}
         max={max}
@@ -106,7 +112,7 @@ function DirectionField({ direction, label, icon, value, min, max, gridColumn, g
   );
 }
 
-export function OffsetControls({ title, description, selectionNoun = "G-Code-Bewegungen", enabled, zEnabled = enabled, selectedCount, busy, onCommit }: {
+export function OffsetControls({ title, description, selectionNoun = "G-Code-Bewegungen", enabled, zEnabled = enabled, selectedCount, busy, onCommit, compact = false }: {
   title: string;
   description: string;
   selectionNoun?: string;
@@ -115,6 +121,7 @@ export function OffsetControls({ title, description, selectionNoun = "G-Code-Bew
   selectedCount: number;
   busy: boolean;
   onCommit: (direction: OffsetDirection, value: number) => Promise<boolean>;
+  compact?: boolean;
 }) {
   const [values, setValues] = useState<Values>({ left: 0, right: 0, up: 0, down: 0, zPlus: 0, zMinus: 0 });
 
@@ -125,8 +132,8 @@ export function OffsetControls({ title, description, selectionNoun = "G-Code-Bew
   }
 
   return (
-    <Paper variant="outlined" sx={{ p: 2.5 }}>
-      <Stack direction={{ xs: "column", md: "row" }} spacing={3} sx={{ alignItems: { md: "center" } }}>
+    <Paper variant="outlined" sx={{ p: compact ? 2 : 2.5, height: "100%", overflow: "auto" }}>
+      <Stack direction={compact ? "column" : { xs: "column", md: "row" }} spacing={compact ? 2 : 3} sx={{ alignItems: compact ? "stretch" : { md: "center" } }}>
         <Box sx={{ minWidth: 220 }}>
           <Typography sx={{ fontWeight: 750 }}>{title}</Typography>
           <Typography variant="body2" color="text.secondary">
@@ -135,15 +142,16 @@ export function OffsetControls({ title, description, selectionNoun = "G-Code-Bew
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{description}</Typography>
           <Typography variant="caption" color="text.secondary">Anwenden mit Enter oder Fokusverlust · ± ändert in 0,1-mm-Schritten</Typography>
         </Box>
-        <Box sx={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(130px, 1fr))", gridTemplateRows: "repeat(3, auto)", gap: 1.25, flex: 1, maxWidth: 800 }}>
-          <DirectionField direction="up" label="+Y" icon={<ArrowUpwardRounded />} value={values.up} min={0} gridColumn={2} gridRow={1} enabled={enabled} busy={busy} onChange={(direction, value) => setValues((current) => ({ ...current, [direction]: value }))} onCommit={(direction, value) => void commit(direction, value)} />
-          <DirectionField direction="left" label="−X" icon={<ArrowBackRounded />} value={values.left} max={0} gridColumn={1} gridRow={2} enabled={enabled} busy={busy} onChange={(direction, value) => setValues((current) => ({ ...current, [direction]: value }))} onCommit={(direction, value) => void commit(direction, value)} />
+        <Box sx={{ display: "grid", gridTemplateColumns: `repeat(${compact ? 3 : 4}, minmax(${compact ? 86 : 130}px, 1fr))`, gridTemplateRows: `repeat(${compact ? 7 : 3}, auto)`, gap: 1.25, flex: 1, maxWidth: 800 }}>
+          <DirectionField compact={compact} direction="up" label="+Y" icon={<ArrowUpwardRounded />} value={values.up} min={0} gridColumn={2} gridRow={1} enabled={enabled} busy={busy} onChange={(direction, value) => setValues((current) => ({ ...current, [direction]: value }))} onCommit={(direction, value) => void commit(direction, value)} />
+          <DirectionField compact={compact} direction="left" label="−X" icon={<ArrowBackRounded />} value={values.left} max={0} gridColumn={1} gridRow={2} enabled={enabled} busy={busy} onChange={(direction, value) => setValues((current) => ({ ...current, [direction]: value }))} onCommit={(direction, value) => void commit(direction, value)} />
           <Box sx={{ gridColumn: 2, gridRow: 2, display: "grid", placeItems: "center", color: "text.secondary", border: "1px dashed", borderColor: "divider", borderRadius: 2 }}><Typography variant="caption">X / Y</Typography></Box>
-          <DirectionField direction="right" label="+X" icon={<ArrowForwardRounded />} value={values.right} min={0} gridColumn={3} gridRow={2} enabled={enabled} busy={busy} onChange={(direction, value) => setValues((current) => ({ ...current, [direction]: value }))} onCommit={(direction, value) => void commit(direction, value)} />
-          <DirectionField direction="down" label="−Y" icon={<ArrowDownwardRounded />} value={values.down} max={0} gridColumn={2} gridRow={3} enabled={enabled} busy={busy} onChange={(direction, value) => setValues((current) => ({ ...current, [direction]: value }))} onCommit={(direction, value) => void commit(direction, value)} />
-          <DirectionField direction="zPlus" label="Z+" icon={<VerticalAlignTopRounded />} value={values.zPlus} min={0} gridColumn={4} gridRow={1} enabled={zEnabled} busy={busy} onChange={(direction, value) => setValues((current) => ({ ...current, [direction]: value }))} onCommit={(direction, value) => void commit(direction, value)} />
-          <Box sx={{ gridColumn: 4, gridRow: 2, display: "grid", placeItems: "center", color: "text.secondary", border: "1px dashed", borderColor: "divider", borderRadius: 2 }}><Typography variant="caption">Z</Typography></Box>
-          <DirectionField direction="zMinus" label="Z−" icon={<VerticalAlignBottomRounded />} value={values.zMinus} max={0} gridColumn={4} gridRow={3} enabled={zEnabled} busy={busy} onChange={(direction, value) => setValues((current) => ({ ...current, [direction]: value }))} onCommit={(direction, value) => void commit(direction, value)} />
+          <DirectionField compact={compact} direction="right" label="+X" icon={<ArrowForwardRounded />} value={values.right} min={0} gridColumn={3} gridRow={2} enabled={enabled} busy={busy} onChange={(direction, value) => setValues((current) => ({ ...current, [direction]: value }))} onCommit={(direction, value) => void commit(direction, value)} />
+          <DirectionField compact={compact} direction="down" label="−Y" icon={<ArrowDownwardRounded />} value={values.down} max={0} gridColumn={2} gridRow={3} enabled={enabled} busy={busy} onChange={(direction, value) => setValues((current) => ({ ...current, [direction]: value }))} onCommit={(direction, value) => void commit(direction, value)} />
+          {compact ? <Box sx={{ gridColumn: "1 / -1", gridRow: 4, display: "flex", alignItems: "center", gap: 1, color: "text.secondary" }}><Box sx={{ flex: 1, borderTop: "1px solid", borderColor: "divider" }} /><Typography variant="caption" sx={{ fontWeight: 750, letterSpacing: "0.08em" }}>Z-ACHSE</Typography><Box sx={{ flex: 1, borderTop: "1px solid", borderColor: "divider" }} /></Box> : null}
+          <DirectionField compact={compact} direction="zPlus" label="Z+" icon={<VerticalAlignTopRounded />} value={values.zPlus} min={0} gridColumn={compact ? 2 : 4} gridRow={compact ? 5 : 1} enabled={zEnabled} busy={busy} onChange={(direction, value) => setValues((current) => ({ ...current, [direction]: value }))} onCommit={(direction, value) => void commit(direction, value)} />
+          <Box sx={{ gridColumn: compact ? 2 : 4, gridRow: compact ? 6 : 2, minHeight: compact ? 38 : undefined, display: "grid", placeItems: "center", color: "text.secondary", border: "1px dashed", borderColor: "divider", borderRadius: 2 }}><Typography variant="caption">Z</Typography></Box>
+          <DirectionField compact={compact} direction="zMinus" label="Z−" icon={<VerticalAlignBottomRounded />} value={values.zMinus} max={0} gridColumn={compact ? 2 : 4} gridRow={compact ? 7 : 3} enabled={zEnabled} busy={busy} onChange={(direction, value) => setValues((current) => ({ ...current, [direction]: value }))} onCommit={(direction, value) => void commit(direction, value)} />
         </Box>
       </Stack>
     </Paper>

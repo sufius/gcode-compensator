@@ -7,6 +7,7 @@ import ChevronLeftRounded from "@mui/icons-material/ChevronLeftRounded";
 import ChevronRightRounded from "@mui/icons-material/ChevronRightRounded";
 import DeleteOutlineRounded from "@mui/icons-material/DeleteOutlineRounded";
 import DeleteForeverRounded from "@mui/icons-material/DeleteForeverRounded";
+import DownloadRounded from "@mui/icons-material/DownloadRounded";
 import EditRounded from "@mui/icons-material/EditRounded";
 import FileUploadRounded from "@mui/icons-material/FileUploadRounded";
 import FolderOpenRounded from "@mui/icons-material/FolderOpenRounded";
@@ -437,6 +438,19 @@ function HomeContent() {
     }
   }
 
+  function downloadCurrentGCode() {
+    if (!gcode) return;
+    const blob = new Blob([gcode.content], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = gcode.name || "toolpath.gcode";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
   async function loadDxf(file: File) {
     await loadFile(file, parseDxf, (value) => {
       setDxf(value);
@@ -552,6 +566,16 @@ function HomeContent() {
                   </MenuItem>)}
                 </Select>
               </FormControl>
+              <Button
+                fullWidth
+                sx={{ mt: 1.25 }}
+                variant="outlined"
+                startIcon={<DownloadRounded />}
+                disabled={!gcode || versionBusy}
+                onClick={downloadCurrentGCode}
+              >
+                Ausgewählten G-Code herunterladen
+              </Button>
             </Box>
           </Stack>
         )}

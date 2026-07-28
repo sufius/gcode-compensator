@@ -518,7 +518,7 @@ function HomeContent() {
         </Stack>
         {error ? <Alert severity="error" onClose={() => setError(null)}>{error}</Alert> : null}
         {selectingOrigin ? <Alert severity="info">Klicke im Koordinatensystem auf einen roten Eckpunkt.</Alert> : null}
-        <Box sx={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: { xs: "1fr", lg: "minmax(0, 1fr) minmax(310px, 26vw)" }, gap: 2, overflow: { xs: "auto", lg: "hidden" } }}>
+        <Box sx={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: { xs: "1fr", lg: "minmax(0, 1fr) minmax(210px, 16vw)" }, gap: 2, overflow: { xs: "auto", lg: "hidden" } }}>
           <Paper elevation={8} sx={{ minHeight: { xs: 500, lg: 0 }, p: 1.5, border: "1px solid", borderColor: "divider", display: "flex", flexDirection: "column" }}>
             <ToolpathViewer fill dxfPaths={transformedDxfPaths} gcodePaths={gcode?.data.paths ?? []} referencePoints={transformedReferencePoints} selectingOrigin={selectingOrigin} onSelectOrigin={(index) => { if (!dxf) return; changeOrigin(dxf.data.referencePoints[index]); setSelectingOrigin(false); }} onSelectionChange={setSelectedPathIndices} nodeMode={nodeMode} onNodeSelectionChange={setSelectedNodes} />
           </Paper>

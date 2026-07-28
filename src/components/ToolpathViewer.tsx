@@ -197,10 +197,27 @@ export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], sel
     const svg = svgRef.current;
     if (!svg) return;
     const handleWheel = (event: WheelEvent) => {
-      if (!event.ctrlKey) return;
       event.preventDefault();
-      const factor = Math.exp(-event.deltaY * 0.0025);
-      zoomAt(svgPoint(event.clientX, event.clientY), factor);
+      if (event.ctrlKey) {
+        const factor = Math.exp(-event.deltaY * 0.0025);
+        zoomAt(svgPoint(event.clientX, event.clientY), factor);
+        return;
+      }
+
+      const bounds = svg.getBoundingClientRect();
+      const modeFactor = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+        ? 16
+        : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+          ? bounds.height
+          : 1;
+      const deltaX = event.deltaX * modeFactor;
+      const deltaY = event.deltaY * modeFactor;
+      const horizontalDelta = event.shiftKey ? (deltaY || deltaX) : deltaX;
+      setViewport((current) => ({
+        ...current,
+        panX: current.panX - horizontalDelta * WIDTH / Math.max(bounds.width, 1),
+        panY: current.panY - (event.shiftKey ? 0 : deltaY) * HEIGHT / Math.max(bounds.height, 1),
+      }));
     };
     svg.addEventListener("wheel", handleWheel, { passive: false });
     return () => svg.removeEventListener("wheel", handleWheel);
@@ -466,7 +483,7 @@ export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], sel
         <Legend color="#8a96a8" label="Eilgang" dashed />
       </Stack>
       <Typography variant="caption" color="text.secondary" sx={{ position: "absolute", left: 18, bottom: 10 }}>Raster: {scene.step.toLocaleString("de-DE")} mm</Typography>
-      <Typography variant="caption" color="text.secondary" sx={{ position: "absolute", left: "50%", bottom: 10, transform: "translateX(-50%)", pointerEvents: "none" }}>{nodeMode ? "Knoten: Klick/Rahmen auswählen · Strg/Shift: hinzufügen · Strg + Mausrad: zoomen · Rechtsziehen: bewegen" : "Links ziehen: auswählen · Strg/Shift + Klick: umschalten · Strg/Shift + Rahmen: hinzufügen · Strg + Mausrad: zoomen · Rechtsziehen: bewegen"}</Typography>
+      <Typography variant="caption" color="text.secondary" sx={{ position: "absolute", left: "50%", bottom: 10, transform: "translateX(-50%)", pointerEvents: "none", whiteSpace: "nowrap" }}>{nodeMode ? "Knoten auswählen · Mausrad: vertikal · Shift + Mausrad: horizontal · Strg + Mausrad: zoomen" : "Links ziehen: auswählen · Mausrad: vertikal · Shift + Mausrad: horizontal · Strg + Mausrad: zoomen"}</Typography>
       {(nodeMode ? selectedNodeKeys.length : selectedSegments.length) ? <Typography variant="caption" sx={{ position: "absolute", left: 18, top: 16, px: 1.25, py: 0.6, bgcolor: "#ff4fd822", color: "#ff8ee6", border: "1px solid #ff4fd866", borderRadius: 1 }}>{nodeMode ? `${selectedNodeKeys.length} Knoten ausgewählt` : `${selectedSegments.length} Segmente ausgewählt`}</Typography> : null}
       <Stack spacing={0.5} sx={{ position: "absolute", right: 18, bottom: 22, bgcolor: "#151b23e6", p: 0.5, borderRadius: 1.5, border: "1px solid", borderColor: "divider" }}>
         <IconButton size="small" color="primary" title="Hineinzoomen" aria-label="In das Koordinatensystem hineinzoomen" onClick={() => zoomAt({ x: WIDTH / 2, y: HEIGHT / 2 }, 1.5)}><AddRounded /></IconButton>

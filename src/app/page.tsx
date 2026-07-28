@@ -18,7 +18,7 @@ import { FileDropzone } from "@/components/FileDropzone";
 import { ToolpathViewer } from "@/components/ToolpathViewer";
 import { OffsetControls, OffsetDirection } from "@/components/OffsetControls";
 import { parseDxf, DxfResult } from "@/lib/dxf";
-import { offsetSelectedGCode, offsetSelectedGCodeNodes, parseGCode, GCodeResult } from "@/lib/gcode";
+import { offsetSelectedGCode, offsetSelectedGCodeNodes, offsetSelectedGCodeZ, parseGCode, GCodeResult } from "@/lib/gcode";
 import { Point, transformPaths, transformPoint } from "@/lib/geometry";
 import type { LoadedProject, ProjectSummary, ProjectVersion, SaveProjectRequest } from "@/lib/project";
 
@@ -234,21 +234,28 @@ function HomeContent() {
   }
 
   async function commitOffset(direction: OffsetDirection, rawValue: number) {
-    const selectionCount = nodeMode ? selectedNodes.length : selectedPathIndices.length;
-    if (!gcode || !selectionCount) return false;
+    const isZOffset = direction === "zPlus" || direction === "zMinus";
+    if (!gcode) return false;
+    const selectionCount = isZOffset
+      ? selectedPathIndices.filter((index) => gcode.data.paths[index]?.gcode?.hasExplicitZ).length
+      : nodeMode ? selectedNodes.length : selectedPathIndices.length;
+    if (!selectionCount) return false;
     if (!activeProject) {
       setError("Bitte das Projekt zuerst speichern, bevor eine neue G-Code-Version angelegt wird.");
       return false;
     }
     if (versionOperationRef.current) return false;
     const amount = Math.abs(rawValue);
+    const zOffset = direction === "zPlus" ? amount : direction === "zMinus" ? -amount : 0;
     const offset = {
       x: direction === "left" ? -amount : direction === "right" ? amount : 0,
       y: direction === "down" ? -amount : direction === "up" ? amount : 0,
     };
-    const content = nodeMode
-      ? offsetSelectedGCodeNodes(gcode.content, gcode.data, selectedNodes, offset)
-      : offsetSelectedGCode(gcode.content, gcode.data, selectedPathIndices, offset);
+    const content = zOffset
+      ? offsetSelectedGCodeZ(gcode.content, gcode.data, selectedPathIndices, zOffset)
+      : nodeMode
+        ? offsetSelectedGCodeNodes(gcode.content, gcode.data, selectedNodes, offset)
+        : offsetSelectedGCode(gcode.content, gcode.data, selectedPathIndices, offset);
     versionOperationRef.current = true;
     setVersionBusy(true);
     try {
@@ -258,7 +265,7 @@ function HomeContent() {
         body: JSON.stringify({
           gcode: { name: gcode.name, content },
           dxfTransform: { rotationDegrees: rotation, origin },
-          label: `${nodeMode ? "Knoten" : "Bewegung"} verschoben: ${offset.x ? "X" : "Y"} ${(offset.x || offset.y).toLocaleString("de-DE")} mm`,
+          label: `${nodeMode && !zOffset ? "Knoten" : "Bewegung"} verschoben: ${zOffset ? "Z" : offset.x ? "X" : "Y"} ${(zOffset || offset.x || offset.y).toLocaleString("de-DE")} mm`,
         }),
       });
       const project = await response.json() as LoadedProject & { error?: string };
@@ -394,6 +401,7 @@ function HomeContent() {
                 description={nodeMode ? "Addiert den Offset auf jeden ausgewählten Koordinatenknoten." : "Bewegt Start und Ende der ausgewählten Bewegung gemeinsam."}
                 selectionNoun={nodeMode ? "Knoten" : "G-Code-Bewegungen"}
                 enabled={(nodeMode ? selectedNodes.length : selectedPathIndices.length) > 0}
+                zEnabled={!nodeMode && selectedPathIndices.some((index) => gcode?.data.paths[index]?.gcode?.hasExplicitZ)}
                 selectedCount={nodeMode ? selectedNodes.length : selectedPathIndices.length}
                 busy={versionBusy}
                 onCommit={commitOffset}

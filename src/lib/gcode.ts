@@ -39,6 +39,7 @@ function arcFromRadius(start: Point, end: Point, radiusWord: number, clockwise: 
 export function parseGCode(source: string): GCodeResult {
   const paths: Path[] = [];
   let position: Point = { x: 0, y: 0 };
+  let positionZ = 0;
   let absolute = true;
   let scale = 1;
   let motion: Motion = 0;
@@ -64,7 +65,11 @@ export function parseGCode(source: string): GCodeResult {
     }
 
     const isArcWithCenter = (motion === 2 || motion === 3) && (words.has("I") || words.has("J"));
-    if (!words.has("X") && !words.has("Y") && !isArcWithCenter) continue;
+    const targetZ = words.has("Z") ? (absolute ? words.get("Z")! * scale : positionZ + words.get("Z")! * scale) : positionZ;
+    if (!words.has("X") && !words.has("Y") && !isArcWithCenter) {
+      positionZ = targetZ;
+      continue;
+    }
     const target = {
       x: words.has("X") ? (absolute ? words.get("X")! * scale : position.x + words.get("X")! * scale) : position.x,
       y: words.has("Y") ? (absolute ? words.get("Y")! * scale : position.y + words.get("Y")! * scale) : position.y,
@@ -89,12 +94,13 @@ export function parseGCode(source: string): GCodeResult {
         );
         points[0] = position;
         points[points.length - 1] = target;
-        paths.push({ points, gcode: { lineIndex, absolute, unitScale: scale } });
-      } else paths.push({ points: [position, target], gcode: { lineIndex, absolute, unitScale: scale } });
+        paths.push({ points, gcode: { lineIndex, absolute, unitScale: scale, startZ: positionZ, endZ: targetZ, hasExplicitZ: words.has("Z") } });
+      } else paths.push({ points: [position, target], gcode: { lineIndex, absolute, unitScale: scale, startZ: positionZ, endZ: targetZ, hasExplicitZ: words.has("Z") } });
     } else {
-      paths.push({ points: [position, target], rapid: motion === 0, gcode: { lineIndex, absolute, unitScale: scale } });
+      paths.push({ points: [position, target], rapid: motion === 0, gcode: { lineIndex, absolute, unitScale: scale, startZ: positionZ, endZ: targetZ, hasExplicitZ: words.has("Z") } });
     }
     position = target;
+    positionZ = targetZ;
   }
 
   return { paths, lineCount: parsedLines, units: "mm" };
@@ -109,7 +115,7 @@ function formatCoordinate(value: number) {
   return String(rounded);
 }
 
-function replaceCoordinate(line: string, letter: "X" | "Y", value: number) {
+function replaceCoordinate(line: string, letter: "X" | "Y" | "Z", value: number) {
   const replacement = `${letter}${formatCoordinate(value)}`;
   const pattern = new RegExp(`${letter}\\s*[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)`, "i");
   if (pattern.test(line)) return line.replace(pattern, replacement);
@@ -139,6 +145,26 @@ export function offsetSelectedGCodeNodes(source: string, result: GCodeResult, se
   if (!selectedNodes.length || (!offset.x && !offset.y)) return source;
   const displacements = new Map(selectedNodes.map((point) => [pointKey(point), offset]));
   return rewriteGCodeWithDisplacements(source, result, displacements);
+}
+
+export function offsetSelectedGCodeZ(source: string, result: GCodeResult, selectedPathIndices: number[], offset: number) {
+  if (!selectedPathIndices.length || !offset) return source;
+  const lines = source.split(/\r?\n/);
+  const selectedLines = new Set<number>();
+
+  selectedPathIndices.forEach((index) => {
+    const path = result.paths[index];
+    if (!path?.gcode || path.rapid || selectedLines.has(path.gcode.lineIndex)) return;
+    const rawLine = lines[path.gcode.lineIndex];
+    const line = rawLine.replace(/\([^)]*\)/g, "").replace(/;.*$/, "").trim();
+    const words = new Map<string, number>();
+    for (const match of line.matchAll(WORD)) words.set(match[1].toUpperCase(), Number(match[2]));
+    if (!words.has("Z")) return;
+    lines[path.gcode.lineIndex] = replaceCoordinate(rawLine, "Z", words.get("Z")! + offset / path.gcode.unitScale);
+    selectedLines.add(path.gcode.lineIndex);
+  });
+
+  return lines.join("\n");
 }
 
 function rewriteGCodeWithDisplacements(source: string, result: GCodeResult, displacements: Map<string, Point>) {

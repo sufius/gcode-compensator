@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { parseDxf } from "../src/lib/dxf";
-import { offsetSelectedGCode, offsetSelectedGCodeNodes, parseGCode } from "../src/lib/gcode";
+import { offsetSelectedGCode, offsetSelectedGCodeNodes, offsetSelectedGCodeZ, parseGCode } from "../src/lib/gcode";
 import { getBounds } from "../src/lib/geometry";
 import { transformPaths, transformPoint } from "../src/lib/geometry";
 
@@ -143,4 +143,36 @@ test("verschiebt ausschließlich ausgewählte G-Code-Knoten", () => {
   assert.deepEqual(parsed.paths[1].points[1], { x: 10.1, y: -0.2 });
   assert.deepEqual(parsed.paths[2].points[0], { x: 10.1, y: -0.2 });
   assert.deepEqual(parsed.paths[2].points[1], { x: 10, y: 10 });
+});
+
+test("addiert einen Z-Offset nur auf ausgewählte G-Code-Bahnen", () => {
+  const source = "G21 G90\nG0 X0 Y0 Z5\nG1 X10 Y0 Z-1\nG1 X10 Y10\nG1 X0 Y10 Z-2";
+  const result = parseGCode(source);
+  const modified = offsetSelectedGCodeZ(source, result, [1, 2], 0.2);
+  const parsed = parseGCode(modified);
+  assert.equal(modified.split("\n")[2], "G1 X10 Y0 Z-0.8");
+  assert.equal(modified.split("\n")[3], "G1 X10 Y10");
+  assert.equal(modified.split("\n")[4], "G1 X0 Y10 Z-2");
+  assert.equal(parsed.paths[0].gcode?.endZ, 5);
+  assert.equal(parsed.paths[1].gcode?.endZ, -0.8);
+  assert.equal(parsed.paths[2].gcode?.endZ, -0.8);
+  assert.equal(parsed.paths[3].gcode?.endZ, -2);
+});
+
+test("verändert auch im relativen G-Code ausschließlich vorhandene Z-Wörter", () => {
+  const source = "G21 G91\nG0 X0 Y0 Z5\nG1 X10 Y0 Z-6\nG1 X0 Y10\nG1 X-10 Y0";
+  const result = parseGCode(source);
+  const modified = offsetSelectedGCodeZ(source, result, [1], -0.1);
+  const parsed = parseGCode(modified);
+  assert.equal(modified.split("\n")[2], "G1 X10 Y0 Z-6.1");
+  assert.equal(modified.split("\n")[3], "G1 X0 Y10");
+  assert.ok(Math.abs((parsed.paths[1].gcode?.endZ ?? 0) + 1.1) < 1e-9);
+  assert.ok(Math.abs((parsed.paths[2].gcode?.endZ ?? 0) + 1.1) < 1e-9);
+  assert.ok(Math.abs((parsed.paths[3].gcode?.endZ ?? 0) + 1.1) < 1e-9);
+});
+
+test("ignoriert eine Auswahl vollständig, wenn die Bahn kein explizites Z enthält", () => {
+  const source = "G21 G90\nG1 X0 Y0 Z-1\nG1 X10 Y0";
+  const result = parseGCode(source);
+  assert.equal(offsetSelectedGCodeZ(source, result, [1], 0.5), source);
 });

@@ -8,6 +8,9 @@ export type Path = {
     lineIndex: number;
     absolute: boolean;
     unitScale: number;
+    startZ: number;
+    endZ: number;
+    hasExplicitZ: boolean;
   };
 };
 

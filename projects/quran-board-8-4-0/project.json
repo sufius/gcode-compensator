@@ -24,7 +24,7 @@
     "showGrid": true,
     "showRapidMoves": true
   },
-  "updatedAt": "2026-07-28T07:58:54.024Z",
+  "updatedAt": "2026-07-28T10:42:56.820Z",
   "versions": [
     {
       "id": "v1",
@@ -123,7 +123,63 @@
           "y": 2.365
         }
       }
+    },
+    {
+      "id": "v8",
+      "createdAt": "2026-07-28T08:07:26.450Z",
+      "label": "Bewegung verschoben: Z 0,5 mm",
+      "gcodePath": "versions/v8/toolpath.gcode",
+      "gcodeSha256": "3832b7db85aa10c9f0e0ecdd38b9e08b5cff41dc551a9c5f9c76c5dd8d7aba84",
+      "dxfTransform": {
+        "rotationDegrees": 90,
+        "origin": {
+          "x": -244.365,
+          "y": 2.365
+        }
+      }
+    },
+    {
+      "id": "v9",
+      "createdAt": "2026-07-28T08:13:43.447Z",
+      "label": "Bewegung verschoben: Z 0,4 mm",
+      "gcodePath": "versions/v9/toolpath.gcode",
+      "gcodeSha256": "4b6174ed343a6908586226cedd10889139dd63907451469111058e936a977c1f",
+      "dxfTransform": {
+        "rotationDegrees": 90,
+        "origin": {
+          "x": -244.365,
+          "y": 2.365
+        }
+      }
+    },
+    {
+      "id": "v10",
+      "createdAt": "2026-07-28T10:41:29.468Z",
+      "label": "Schruppen + Schlichten · Zugabe X/Y/Z 0,1/0,1/0,1 mm",
+      "gcodePath": "versions/v10/toolpath.gcode",
+      "gcodeSha256": "cd4b85cac01264b593e2427ca17fd45de7455e2821ac1000e28d00528e857d5c",
+      "dxfTransform": {
+        "rotationDegrees": 90,
+        "origin": {
+          "x": -244.365,
+          "y": 2.365
+        }
+      }
+    },
+    {
+      "id": "v11",
+      "createdAt": "2026-07-28T10:42:55.465Z",
+      "label": "Schruppen + Schlichten · Zugabe X/Y/Z 0,1/0,1/0,1 mm",
+      "gcodePath": "versions/v11/toolpath.gcode",
+      "gcodeSha256": "95652e3be79ab119e8d03a433337a66f7ebc33430c18cddeb51d07fbef5f9c65",
+      "dxfTransform": {
+        "rotationDegrees": 90,
+        "origin": {
+          "x": -244.365,
+          "y": 2.365
+        }
+      }
     }
   ],
-  "currentVersion": "v7"
+  "currentVersion": "v11"
 }

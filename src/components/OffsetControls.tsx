@@ -132,7 +132,7 @@ export function OffsetControls({ title, description, selectionNoun = "G-Code-Bew
   }
 
   return (
-    <Paper variant="outlined" sx={{ p: compact ? 2 : 2.5, height: "100%", overflow: "auto" }}>
+    <Paper variant="outlined" sx={{ p: compact ? 2 : 2.5, height: compact ? "auto" : "100%", overflow: "auto" }}>
       <Stack direction={compact ? "column" : { xs: "column", md: "row" }} spacing={compact ? 6 : 7} sx={{ alignItems: compact ? "stretch" : { md: "center" } }}>
         <Box sx={{ minWidth: 220 }}>
           <Typography sx={{ fontWeight: 750 }}>{title}</Typography>

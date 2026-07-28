@@ -23,8 +23,9 @@ import { Alert, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogC
 import { FileDropzone } from "@/components/FileDropzone";
 import { ToolpathViewer } from "@/components/ToolpathViewer";
 import { OffsetControls, OffsetDirection } from "@/components/OffsetControls";
+import { PocketFinishingControls } from "@/components/PocketFinishingControls";
 import { parseDxf, DxfResult } from "@/lib/dxf";
-import { offsetSelectedGCode, offsetSelectedGCodeNodes, offsetSelectedGCodeZ, parseGCode, GCodeResult } from "@/lib/gcode";
+import { createPocketRoughingAndFinishing, offsetSelectedGCode, offsetSelectedGCodeNodes, offsetSelectedGCodeZ, parseGCode, GCodeResult, PocketFinishingParameters, PocketPassResult } from "@/lib/gcode";
 import { Point, transformPaths, transformPoint } from "@/lib/geometry";
 import type { LoadedProject, ProjectSummary, ProjectVersion, SaveProjectRequest } from "@/lib/project";
 
@@ -86,7 +87,14 @@ function HomeContent() {
   const [projectNameDraft, setProjectNameDraft] = useState("");
   const [deleteProjectOpen, setDeleteProjectOpen] = useState(false);
   const [projectBusy, setProjectBusy] = useState(false);
+  const [pocketParameters, setPocketParameters] = useState<PocketFinishingParameters>({ allowanceX: 0.1, allowanceY: 0.1, allowanceZ: 0.1, roughingFeed: 1200, finishingFeed: 600 });
+  const [pocketPreview, setPocketPreview] = useState<PocketPassResult | null>(null);
   const versionOperationRef = useRef(false);
+
+  const handlePathSelectionChange = useCallback((indices: number[]) => {
+    setSelectedPathIndices(indices);
+    setPocketPreview(null);
+  }, []);
 
   const transformedDxfPaths = useMemo(() => dxf ? transformPaths(dxf.data.paths, rotation, origin) : [], [dxf, rotation, origin]);
   const transformedReferencePoints = useMemo(() => dxf ? dxf.data.referencePoints.map((point) => transformPoint(point, rotation, origin)) : [], [dxf, rotation, origin]);
@@ -338,6 +346,51 @@ function HomeContent() {
     }
   }
 
+  function previewPocketPasses() {
+    if (!gcode) return;
+    try {
+      setPocketPreview(createPocketRoughingAndFinishing(gcode.content, gcode.data, selectedPathIndices, pocketParameters));
+      setError(null);
+    } catch (reason) {
+      setPocketPreview(null);
+      setError(reason instanceof Error ? reason.message : "Der Taschenpfad konnte nicht analysiert werden.");
+    }
+  }
+
+  async function savePocketPasses() {
+    if (!gcode || !pocketPreview) return;
+    if (!activeProject) {
+      setPocketPreview(null);
+      setError("Bitte das Projekt zuerst speichern, bevor eine neue G-Code-Version angelegt wird.");
+      return;
+    }
+    if (versionOperationRef.current) return;
+    versionOperationRef.current = true;
+    setVersionBusy(true);
+    try {
+      const response = await fetch(`/api/projects/${encodeURIComponent(activeProject)}/versions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          gcode: { name: gcode.name, content: pocketPreview.content },
+          dxfTransform: { rotationDegrees: rotation, origin },
+          label: `Schruppen + Schlichten · Zugabe X/Y/Z ${pocketParameters.allowanceX.toLocaleString("de-DE")}/${pocketParameters.allowanceY.toLocaleString("de-DE")}/${pocketParameters.allowanceZ.toLocaleString("de-DE")} mm`,
+        }),
+      });
+      const project = await response.json() as LoadedProject & { error?: string };
+      if (!response.ok) throw new Error(project.error);
+      applyLoadedVersion(project);
+      setPocketPreview(null);
+      setError(null);
+      await refreshProjects();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Schrupp- und Schlichtversion konnte nicht gespeichert werden.");
+    } finally {
+      versionOperationRef.current = false;
+      setVersionBusy(false);
+    }
+  }
+
   async function switchVersion(versionId: string) {
     if (!activeProject || versionOperationRef.current) return;
     versionOperationRef.current = true;
@@ -520,10 +573,13 @@ function HomeContent() {
         {selectingOrigin ? <Alert severity="info">Klicke im Koordinatensystem auf einen roten Eckpunkt.</Alert> : null}
         <Box sx={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: { xs: "1fr", lg: "minmax(0, 1fr) minmax(210px, 16vw)" }, gap: 2, overflow: { xs: "auto", lg: "hidden" } }}>
           <Paper elevation={8} sx={{ minHeight: { xs: 500, lg: 0 }, p: 1.5, border: "1px solid", borderColor: "divider", display: "flex", flexDirection: "column" }}>
-            <ToolpathViewer fill dxfPaths={transformedDxfPaths} gcodePaths={gcode?.data.paths ?? []} referencePoints={transformedReferencePoints} selectingOrigin={selectingOrigin} onSelectOrigin={(index) => { if (!dxf) return; changeOrigin(dxf.data.referencePoints[index]); setSelectingOrigin(false); }} onSelectionChange={setSelectedPathIndices} nodeMode={nodeMode} onNodeSelectionChange={setSelectedNodes} />
+            <ToolpathViewer fill dxfPaths={transformedDxfPaths} gcodePaths={gcode?.data.paths ?? []} referencePoints={transformedReferencePoints} selectingOrigin={selectingOrigin} onSelectOrigin={(index) => { if (!dxf) return; changeOrigin(dxf.data.referencePoints[index]); setSelectingOrigin(false); }} onSelectionChange={handlePathSelectionChange} nodeMode={nodeMode} onNodeSelectionChange={setSelectedNodes} />
           </Paper>
-          <Box sx={{ minHeight: { xs: 480, lg: 0 } }}>
-            <OffsetControls compact title={nodeMode ? "Knoten verschieben" : "Jog"} description={nodeMode ? "Addiert den Offset auf jeden ausgewählten Koordinatenknoten." : "Bewegt Start und Ende der ausgewählten Bewegung gemeinsam."} selectionNoun={nodeMode ? "Knoten" : "G-Code-Bewegungen"} enabled={(nodeMode ? selectedNodes.length : selectedPathIndices.length) > 0} zEnabled={!nodeMode && selectedPathIndices.some((index) => gcode?.data.paths[index]?.gcode?.hasExplicitZ)} selectedCount={nodeMode ? selectedNodes.length : selectedPathIndices.length} busy={versionBusy} onCommit={commitOffset} />
+          <Box sx={{ minHeight: { xs: 480, lg: 0 }, overflow: "auto" }}>
+            <Stack spacing={2}>
+              <PocketFinishingControls values={pocketParameters} enabled={!!gcode && !nodeMode && selectedPathIndices.length > 0} busy={versionBusy} onChange={(values) => { setPocketParameters(values); setPocketPreview(null); }} onPreview={previewPocketPasses} />
+              <OffsetControls compact title={nodeMode ? "Knoten verschieben" : "Jog"} description={nodeMode ? "Addiert den Offset auf jeden ausgewählten Koordinatenknoten." : "Bewegt Start und Ende der ausgewählten Bewegung gemeinsam."} selectionNoun={nodeMode ? "Knoten" : "G-Code-Bewegungen"} enabled={(nodeMode ? selectedNodes.length : selectedPathIndices.length) > 0} zEnabled={!nodeMode && selectedPathIndices.some((index) => gcode?.data.paths[index]?.gcode?.hasExplicitZ)} selectedCount={nodeMode ? selectedNodes.length : selectedPathIndices.length} busy={versionBusy} onCommit={commitOffset} />
+            </Stack>
           </Box>
         </Box>
       </Box>
@@ -541,6 +597,28 @@ function HomeContent() {
       <Dialog open={!!versionToDelete} onClose={() => { if (!versionBusy) setVersionToDelete(null); }}>
         <DialogTitle>Projektversion löschen?</DialogTitle><DialogContent><DialogContentText>„{versionToDelete?.label}“ wird aus der Versionshistorie entfernt. Diese Aktion kann nicht rückgängig gemacht werden.</DialogContentText></DialogContent>
         <DialogActions><Button color="inherit" disabled={versionBusy} onClick={() => setVersionToDelete(null)}>Abbrechen</Button><Button color="error" variant="contained" disabled={versionBusy} onClick={() => void deleteSelectedVersion()}>Löschen</Button></DialogActions>
+      </Dialog>
+      <Dialog open={!!pocketPreview} onClose={() => { if (!versionBusy) setPocketPreview(null); }} fullWidth maxWidth="sm">
+        <DialogTitle>Schruppen und Schlichten prüfen</DialogTitle>
+        <DialogContent>
+          {pocketPreview ? <Stack spacing={1.5}>
+            <Alert severity="info">Der ausgewählte Block (Zeilen {pocketPreview.summary.startLine + 1}–{pocketPreview.summary.endLine + 1}) wird vollständig zweimal gefahren.</Alert>
+            <Box sx={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 0.75 }}>
+              {[
+                ["Endmaß X / Y", `${pocketPreview.summary.endSizeX.toLocaleString("de-DE", { maximumFractionDigits: 5 })} × ${pocketPreview.summary.endSizeY.toLocaleString("de-DE", { maximumFractionDigits: 5 })} mm`],
+                ["Schruppmaß X / Y", `${pocketPreview.summary.roughSizeX.toLocaleString("de-DE", { maximumFractionDigits: 5 })} × ${pocketPreview.summary.roughSizeY.toLocaleString("de-DE", { maximumFractionDigits: 5 })} mm`],
+                ["Endtiefe Z", `${pocketPreview.summary.endDepth.toLocaleString("de-DE", { maximumFractionDigits: 5 })} mm`],
+                ["Schrupp-Endtiefe Z", `${pocketPreview.summary.roughDepth.toLocaleString("de-DE", { maximumFractionDigits: 5 })} mm`],
+                ["Schruppvorschub", `${pocketPreview.summary.roughingFeed.toLocaleString("de-DE")} mm/min`],
+                ["Schlichtvorschub", `${pocketPreview.summary.finishingFeed.toLocaleString("de-DE")} mm/min`],
+                ["Taschenmittelpunkt", `X ${pocketPreview.summary.center.x.toLocaleString("de-DE", { maximumFractionDigits: 5 })} / Y ${pocketPreview.summary.center.y.toLocaleString("de-DE", { maximumFractionDigits: 5 })} mm`],
+              ].map(([label, value]) => <Box key={label} sx={{ display: "contents" }}><Typography color="text.secondary">{label}</Typography><Typography sx={{ textAlign: "right", fontWeight: 700 }}>{value}</Typography></Box>)}
+            </Box>
+            {pocketPreview.summary.convertedArcCount ? <Alert severity="warning">{pocketPreview.summary.convertedArcCount} Kreisbogen/-bögen werden wegen unterschiedlicher X-/Y-Skalierung als feine G1-Segmente ausgegeben.</Alert> : null}
+            <Alert severity="success"><Stack spacing={0.5}>{pocketPreview.summary.checks.map((check) => <Typography variant="body2" key={check}>✓ {check}</Typography>)}</Stack></Alert>
+          </Stack> : null}
+        </DialogContent>
+        <DialogActions><Button color="inherit" disabled={versionBusy} onClick={() => setPocketPreview(null)}>Abbrechen</Button><Button variant="contained" disabled={versionBusy} onClick={() => void savePocketPasses()}>{versionBusy ? "Speichert …" : "Als neue Version speichern"}</Button></DialogActions>
       </Dialog>
     </Box>
   );

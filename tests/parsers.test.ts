@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { parseDxf } from "../src/lib/dxf";
-import { offsetSelectedGCode, offsetSelectedGCodeNodes, offsetSelectedGCodeZ, parseGCode } from "../src/lib/gcode";
+import { createPocketRoughingAndFinishing, offsetSelectedGCode, offsetSelectedGCodeNodes, offsetSelectedGCodeZ, parseGCode } from "../src/lib/gcode";
 import { getBounds } from "../src/lib/geometry";
 import { transformPaths, transformPoint } from "../src/lib/geometry";
 
@@ -175,4 +175,79 @@ test("ignoriert eine Auswahl vollständig, wenn die Bahn kein explizites Z enth�
   const source = "G21 G90\nG1 X0 Y0 Z-1\nG1 X10 Y0";
   const result = parseGCode(source);
   assert.equal(offsetSelectedGCodeZ(source, result, [1], 0.5), source);
+});
+
+test("erzeugt vollständige Schrupp- und Schlichtdurchgänge mit symmetrischer Zugabe", () => {
+  const source = `G21 G90
+G0 X0 Y0
+G0 Z0.5
+G1 Z-6.8 F200
+G1 Y96.9 F400
+G1 X46.5
+G1 Y0
+G1 X0
+G1 Y96.9
+G0 Z5
+; andere Operation
+G0 X100 Y100
+G1 Z-2 F300`;
+  const parsed = parseGCode(source);
+  const pocketIndices = parsed.paths
+    .map((path, index) => ({ path, index }))
+    .filter(({ path }) => !path.rapid && path.gcode && path.gcode.lineIndex <= 8)
+    .map(({ index }) => index);
+  const generated = createPocketRoughingAndFinishing(source, parsed, pocketIndices, {
+    allowanceX: 0.1,
+    allowanceY: 0.1,
+    allowanceZ: 0.1,
+    roughingFeed: 1200,
+    finishingFeed: 600,
+  });
+
+  assert.ok(Math.abs(generated.summary.endSizeX - 46.5) < 1e-9);
+  assert.ok(Math.abs(generated.summary.endSizeY - 96.9) < 1e-9);
+  assert.ok(Math.abs(generated.summary.roughSizeX - 46.3) < 1e-9);
+  assert.ok(Math.abs(generated.summary.roughSizeY - 96.7) < 1e-9);
+  assert.ok(Math.abs(generated.summary.endDepth + 6.8) < 1e-9);
+  assert.ok(Math.abs(generated.summary.roughDepth + 6.7) < 1e-9);
+  assert.match(generated.content, /; --- Schruppen:/);
+  assert.match(generated.content, /G1 Z-6\.7 F1200/);
+  assert.match(generated.content, /G0 X0\.1 Y0\.1/);
+  assert.match(generated.content, /; --- Schlichten auf ursprüngliches Endmaß ---/);
+  assert.match(generated.content, /G1 Z-6\.8 F600/);
+  assert.equal(generated.content.match(/; andere Operation/g)?.length, 1);
+  assert.equal(generated.content.match(/G0 X100 Y100/g)?.length, 1);
+});
+
+test("linearisiert Kreisbögen bei unterschiedlicher X- und Y-Skalierung", () => {
+  const source = `G21 G90
+G0 X10 Y0
+G1 Z-2
+G2 I-10 J0 F300
+G0 Z5`;
+  const parsed = parseGCode(source);
+  const generated = createPocketRoughingAndFinishing(source, parsed, [1], {
+    allowanceX: 0.5,
+    allowanceY: 1,
+    allowanceZ: 0.1,
+    roughingFeed: 1000,
+    finishingFeed: 500,
+  });
+  const roughing = generated.content.split("; --- Schlichten")[0];
+  assert.equal(generated.summary.convertedArcCount, 1);
+  assert.ok((roughing.match(/^G1 X/gm)?.length ?? 0) > 50);
+  assert.doesNotMatch(roughing, /^G[23](?:\s|X|Y|I|J|R)/m);
+  assert.match(generated.content, /G2 I-10 J0 F500/);
+});
+
+test("lehnt relative Koordinaten im Taschenblock mit verständlicher Meldung ab", () => {
+  const source = "G21 G91\nG0 X0 Y0\nG1 Z-2\nG1 X10\nG1 Y10\nG0 Z5";
+  const parsed = parseGCode(source);
+  assert.throws(() => createPocketRoughingAndFinishing(source, parsed, [1, 2], {
+    allowanceX: 0.1,
+    allowanceY: 0.1,
+    allowanceZ: 0.1,
+    roughingFeed: 1000,
+    finishingFeed: 500,
+  }), /relative Koordinaten \(G91\)/);
 });

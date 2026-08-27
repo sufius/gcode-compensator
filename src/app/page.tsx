@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AddRounded from "@mui/icons-material/AddRounded";
 import ArchitectureRounded from "@mui/icons-material/ArchitectureRounded";
 import ChevronLeftRounded from "@mui/icons-material/ChevronLeftRounded";
@@ -27,7 +27,7 @@ import { OffsetControls, OffsetDirection } from "@/components/OffsetControls";
 import { PocketFinishingControls } from "@/components/PocketFinishingControls";
 import { parseDxf, DxfResult } from "@/lib/dxf";
 import { createPocketRoughingAndFinishing, offsetSelectedGCode, offsetSelectedGCodeNodes, offsetSelectedGCodeZ, parseGCode, GCodeResult, PocketFinishingParameters, PocketPassResult } from "@/lib/gcode";
-import { Point, transformPaths, transformPoint } from "@/lib/geometry";
+import { transformPaths, transformPoint, type Path, type Point } from "@/lib/geometry";
 import type { LoadedProject, ProjectSummary, ProjectVersion, SaveProjectRequest } from "@/lib/project";
 
 type Loaded<T> = { name: string; content: string; data: T };
@@ -35,6 +35,7 @@ type SaveState = "idle" | "dirty" | "saving" | "saved";
 const LAST_PROJECT_KEY = "gcode-compensator:last-project";
 const DRAWER_WIDTH = 400;
 const MINI_DRAWER_WIDTH = 72;
+const EMPTY_PATHS: Path[] = [];
 
 function rememberProject(slug: string) {
   try { window.localStorage.setItem(LAST_PROJECT_KEY, slug); } catch { /* Storage kann im privaten Modus gesperrt sein. */ }
@@ -49,23 +50,6 @@ function rememberedProject() {
 }
 
 export default function Home() {
-  const hydrated = useSyncExternalStore(subscribeToHydration, getClientSnapshot, getServerSnapshot);
-  return hydrated ? <HomeContent /> : null;
-}
-
-function subscribeToHydration() {
-  return () => undefined;
-}
-
-function getClientSnapshot() {
-  return true;
-}
-
-function getServerSnapshot() {
-  return false;
-}
-
-function HomeContent() {
   const [dxf, setDxf] = useState<Loaded<DxfResult> | null>(null);
   const [gcode, setGcode] = useState<Loaded<GCodeResult> | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -93,8 +77,12 @@ function HomeContent() {
   const versionOperationRef = useRef(false);
 
   const handlePathSelectionChange = useCallback((indices: number[]) => {
-    setSelectedPathIndices(indices);
+    setSelectedPathIndices((current) => current.length === indices.length && current.every((value, index) => value === indices[index]) ? current : indices);
     setPocketPreview(null);
+  }, []);
+
+  const handleNodeSelectionChange = useCallback((points: Point[]) => {
+    setSelectedNodes((current) => current.length === points.length && current.every((point, index) => point.x === points[index].x && point.y === points[index].y) ? current : points);
   }, []);
 
   const transformedDxfPaths = useMemo(() => dxf ? transformPaths(dxf.data.paths, rotation, origin) : [], [dxf, rotation, origin]);
@@ -597,7 +585,7 @@ function HomeContent() {
         {selectingOrigin ? <Alert severity="info">Klicke im Koordinatensystem auf einen roten Eckpunkt.</Alert> : null}
         <Box sx={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: { xs: "1fr", lg: "minmax(0, 1fr) minmax(210px, 16vw)" }, gap: 2, overflow: { xs: "auto", lg: "hidden" } }}>
           <Paper elevation={8} sx={{ minHeight: { xs: 500, lg: 0 }, p: 1.5, border: "1px solid", borderColor: "divider", display: "flex", flexDirection: "column" }}>
-            <ToolpathViewer fill dxfPaths={transformedDxfPaths} gcodePaths={gcode?.data.paths ?? []} referencePoints={transformedReferencePoints} selectingOrigin={selectingOrigin} onSelectOrigin={(index) => { if (!dxf) return; changeOrigin(dxf.data.referencePoints[index]); setSelectingOrigin(false); }} onSelectionChange={handlePathSelectionChange} nodeMode={nodeMode} onNodeSelectionChange={setSelectedNodes} />
+            <ToolpathViewer fill dxfPaths={transformedDxfPaths} gcodePaths={gcode?.data.paths ?? EMPTY_PATHS} referencePoints={transformedReferencePoints} selectingOrigin={selectingOrigin} onSelectOrigin={(index) => { if (!dxf) return; changeOrigin(dxf.data.referencePoints[index]); setSelectingOrigin(false); }} onSelectionChange={handlePathSelectionChange} nodeMode={nodeMode} onNodeSelectionChange={handleNodeSelectionChange} />
           </Paper>
           <Box sx={{ minHeight: { xs: 480, lg: 0 }, overflow: "auto" }}>
             <Stack spacing={2}>

@@ -16,5 +16,50 @@
     "showGrid": true,
     "showRapidMoves": true
   },
-  "updatedAt": "2026-08-25T17:46:08.129Z"
+  "updatedAt": "2026-08-27T15:06:39.998Z",
+  "versions": [
+    {
+      "id": "v1",
+      "createdAt": "2026-08-27T15:03:22.687Z",
+      "label": "Schruppen + Schlichten · Zugabe X/Y/Z 0,2/0,2/0,2 mm",
+      "gcodePath": "versions/v1/toolpath.gcode",
+      "gcodeSha256": "7e380ef6becee0cc714888893a3ade99947ff2b6b707e8cf1dc63264635e59f1",
+      "dxfTransform": {
+        "rotationDegrees": 0,
+        "origin": {
+          "x": -2.365,
+          "y": -2.365
+        }
+      }
+    },
+    {
+      "id": "v2",
+      "createdAt": "2026-08-27T15:04:46.227Z",
+      "label": "Schruppen + Schlichten · Zugabe X/Y/Z 0,2/0,2/0,2 mm",
+      "gcodePath": "versions/v2/toolpath.gcode",
+      "gcodeSha256": "1c6d80bb2e7ea53a9abc325e3554f7011153abc6086212b549c597f1b2394bfc",
+      "dxfTransform": {
+        "rotationDegrees": 0,
+        "origin": {
+          "x": -2.365,
+          "y": -2.365
+        }
+      }
+    },
+    {
+      "id": "v3",
+      "createdAt": "2026-08-27T15:06:39.094Z",
+      "label": "Schruppen + Schlichten · Zugabe X/Y/Z 0,2/0,2/0,2 mm",
+      "gcodePath": "versions/v3/toolpath.gcode",
+      "gcodeSha256": "b0c11c10a84811eec830cf5e9c1ef53202cd29a06becb73db1843db70561b5a8",
+      "dxfTransform": {
+        "rotationDegrees": 0,
+        "origin": {
+          "x": -2.365,
+          "y": -2.365
+        }
+      }
+    }
+  ],
+  "currentVersion": "v3"
 }

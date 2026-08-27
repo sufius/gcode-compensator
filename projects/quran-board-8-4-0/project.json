@@ -179,7 +179,49 @@
           "y": 2.365
         }
       }
+    },
+    {
+      "id": "v12",
+      "createdAt": "2026-07-28T13:53:38.054Z",
+      "label": "Bewegung verschoben: Z 0,3 mm",
+      "gcodePath": "versions/v12/toolpath.gcode",
+      "gcodeSha256": "34d52ffec3f1ec1bb5cc868413a3e26a4d4c9823645d3f8d4a22d52d1a85139b",
+      "dxfTransform": {
+        "rotationDegrees": 90,
+        "origin": {
+          "x": -244.365,
+          "y": 2.365
+        }
+      }
+    },
+    {
+      "id": "v13",
+      "createdAt": "2026-07-28T13:54:04.149Z",
+      "label": "Geschwindigkeiten global geändert",
+      "gcodePath": "versions/v13/toolpath.gcode",
+      "gcodeSha256": "0f4466902ebb44d2f134d49b6a09c9898f5fe1a2803dc51302d438ec639567d5",
+      "dxfTransform": {
+        "rotationDegrees": 90,
+        "origin": {
+          "x": -244.365,
+          "y": 2.365
+        }
+      }
+    },
+    {
+      "id": "v14",
+      "createdAt": "2026-07-28T14:52:41.600Z",
+      "label": "Bewegung verschoben: Y 0,3 mm",
+      "gcodePath": "versions/v14/toolpath.gcode",
+      "gcodeSha256": "de93ee06a24661f377d4fce4856e93d1e79bfa653645e044e5cbaafad283fe3f",
+      "dxfTransform": {
+        "rotationDegrees": 90,
+        "origin": {
+          "x": -244.365,
+          "y": 2.365
+        }
+      }
     }
   ],
-  "currentVersion": "v11"
+  "currentVersion": "v14"
 }

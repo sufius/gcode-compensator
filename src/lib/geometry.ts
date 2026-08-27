@@ -11,6 +11,7 @@ export type Path = {
     startZ: number;
     endZ: number;
     hasExplicitZ: boolean;
+    feed: number | null;
   };
 };
 

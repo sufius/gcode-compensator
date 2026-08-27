@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { parseDxf } from "../src/lib/dxf";
-import { createPocketRoughingAndFinishing, offsetSelectedGCode, offsetSelectedGCodeNodes, offsetSelectedGCodeZ, parseGCode } from "../src/lib/gcode";
+import { analyzeGCodeFeeds, createPocketRoughingAndFinishing, offsetSelectedGCode, offsetSelectedGCodeNodes, offsetSelectedGCodeZ, parseGCode, updateGCodeFeeds } from "../src/lib/gcode";
 import { getBounds } from "../src/lib/geometry";
 import { transformPaths, transformPoint } from "../src/lib/geometry";
 
@@ -250,4 +250,55 @@ test("lehnt relative Koordinaten im Taschenblock mit verständlicher Meldung ab"
     roughingFeed: 1000,
     finishingFeed: 500,
   }), /relative Koordinaten \(G91\)/);
+});
+
+test("erkennt globale Vorschub- und Eintauchgeschwindigkeiten einschließlich modaler Vererbung", () => {
+  const source = `G21 G90
+G0 X0 Y0 Z1
+G1 Z0 F120
+G1 Y10 Z-2
+G1 Y20 F400
+G1 X10
+G0 Z5`;
+  const parsed = parseGCode(source);
+  const analysis = analyzeGCodeFeeds(source, parsed);
+  assert.equal(analysis.globalPlungeFeed, 120);
+  assert.equal(analysis.globalCuttingFeed, 400);
+  assert.equal(parsed.paths.find((path) => path.gcode?.lineIndex === 3)?.gcode?.feed, 120);
+  assert.equal(parsed.paths.find((path) => path.gcode?.lineIndex === 5)?.gcode?.feed, 400);
+});
+
+test("ändert Vorschub und Eintauchgeschwindigkeit global nach Bewegungsart", () => {
+  const source = `G21 G90
+G0 X0 Y0 Z1
+G1 Z0 F120
+G1 Y10 Z-2
+G1 Y20 F400
+G1 X10
+G0 Z5`;
+  const parsed = parseGCode(source);
+  const content = updateGCodeFeeds(source, parsed, { cuttingFeed: 900, plungeFeed: 80 });
+  const analysis = analyzeGCodeFeeds(content, parseGCode(content));
+  assert.equal(analysis.globalPlungeFeed, 80);
+  assert.equal(analysis.globalCuttingFeed, 900);
+  assert.match(content, /G1 Z0 F80/);
+  assert.match(content, /G1 Y20 F900/);
+});
+
+test("begrenzt einen geänderten Vorschub auf die ausgewählte Bahn", () => {
+  const source = `G21 G90
+G0 X0 Y0 Z1
+G1 Z0 F120
+G1 Y10 Z-2
+G1 Y20 F400
+G1 X10
+G1 Y30
+G0 Z5`;
+  const parsed = parseGCode(source);
+  const selectedIndex = parsed.paths.findIndex((path) => path.gcode?.lineIndex === 5);
+  const content = updateGCodeFeeds(source, parsed, { cuttingFeed: 650, selectedPathIndices: [selectedIndex] });
+  const modified = parseGCode(content);
+  assert.match(content, /G1 X10 F650\nF400 ; ursprünglichen Vorschub/);
+  assert.equal(modified.paths.find((path) => path.gcode?.lineIndex === 5)?.gcode?.feed, 650);
+  assert.equal(modified.paths.find((path) => path.points.at(-1)?.y === 30)?.gcode?.feed, 400);
 });

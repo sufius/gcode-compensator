@@ -26,7 +26,7 @@ import { ToolpathViewer } from "@/components/ToolpathViewer";
 import { OffsetControls, OffsetDirection } from "@/components/OffsetControls";
 import { PocketFinishingControls } from "@/components/PocketFinishingControls";
 import { parseDxf, DxfResult } from "@/lib/dxf";
-import { createPocketRoughingAndFinishing, offsetSelectedGCode, offsetSelectedGCodeNodes, offsetSelectedGCodeZ, parseGCode, GCodeResult, PocketFinishingParameters, PocketPassResult } from "@/lib/gcode";
+import { analyzeGCodeFeeds, createPocketRoughingAndFinishing, offsetSelectedGCode, offsetSelectedGCodeNodes, offsetSelectedGCodeZ, parseGCode, GCodeResult, PocketFinishingParameters, PocketPassResult, updateGCodeFeeds } from "@/lib/gcode";
 import { transformPaths, transformPoint, type Path, type Point } from "@/lib/geometry";
 import type { LoadedProject, ProjectSummary, ProjectVersion, SaveProjectRequest } from "@/lib/project";
 
@@ -74,6 +74,7 @@ export default function Home() {
   const [projectBusy, setProjectBusy] = useState(false);
   const [pocketParameters, setPocketParameters] = useState<PocketFinishingParameters>({ allowanceX: 0.1, allowanceY: 0.1, allowanceZ: 0.1, roughingFeed: 1200, finishingFeed: 600 });
   const [pocketPreview, setPocketPreview] = useState<PocketPassResult | null>(null);
+  const [feedDraft, setFeedDraft] = useState({ key: "", cutting: 0, plunge: 0 });
   const versionOperationRef = useRef(false);
 
   const handlePathSelectionChange = useCallback((indices: number[]) => {
@@ -87,6 +88,17 @@ export default function Home() {
 
   const transformedDxfPaths = useMemo(() => dxf ? transformPaths(dxf.data.paths, rotation, origin) : [], [dxf, rotation, origin]);
   const transformedReferencePoints = useMemo(() => dxf ? dxf.data.referencePoints.map((point) => transformPoint(point, rotation, origin)) : [], [dxf, rotation, origin]);
+  const feedAnalysis = useMemo(() => gcode ? analyzeGCodeFeeds(gcode.content, gcode.data, selectedPathIndices) : null, [gcode, selectedPathIndices]);
+  const hasFeedSelection = selectedPathIndices.length > 0;
+  const displayedCuttingFeed = feedAnalysis ? (feedAnalysis.hasSelectedCutting ? feedAnalysis.selectedCuttingFeed : feedAnalysis.globalCuttingFeed) : null;
+  const displayedPlungeFeed = feedAnalysis ? (feedAnalysis.hasSelectedPlunge ? feedAnalysis.selectedPlungeFeed : feedAnalysis.globalPlungeFeed) : null;
+  const cuttingFeedEditable = !!feedAnalysis && (!hasFeedSelection || feedAnalysis.hasSelectedCutting);
+  const plungeFeedEditable = !!feedAnalysis && (!hasFeedSelection || feedAnalysis.hasSelectedPlunge);
+  const feedContextKey = `${currentVersion}|${gcode?.name ?? ""}|${selectedPathIndices.join(",")}|${displayedCuttingFeed ?? ""}|${displayedPlungeFeed ?? ""}`;
+  const cuttingFeedDraft = feedDraft.key === feedContextKey ? feedDraft.cutting : displayedCuttingFeed ?? 0;
+  const plungeFeedDraft = feedDraft.key === feedContextKey ? feedDraft.plunge : displayedPlungeFeed ?? 0;
+  const cuttingFeedDirty = cuttingFeedEditable && displayedCuttingFeed !== null && Math.abs(cuttingFeedDraft - displayedCuttingFeed) > 1e-7;
+  const plungeFeedDirty = plungeFeedEditable && displayedPlungeFeed !== null && Math.abs(plungeFeedDraft - displayedPlungeFeed) > 1e-7;
 
   async function loadFile<T>(file: File, parser: (content: string) => T, setter: (value: Loaded<T>) => void) {
     try {
@@ -380,6 +392,51 @@ export default function Home() {
     }
   }
 
+  async function saveFeedChanges() {
+    if (!gcode || (!cuttingFeedDirty && !plungeFeedDirty)) return;
+    if (!activeProject) {
+      setError("Bitte das Projekt zuerst speichern, bevor eine neue G-Code-Version angelegt wird.");
+      return;
+    }
+    if (versionOperationRef.current) return;
+    let content: string;
+    try {
+      content = updateGCodeFeeds(gcode.content, gcode.data, {
+        cuttingFeed: cuttingFeedDirty ? cuttingFeedDraft : undefined,
+        plungeFeed: plungeFeedDirty ? plungeFeedDraft : undefined,
+        selectedPathIndices: hasFeedSelection ? selectedPathIndices : undefined,
+      });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Die Geschwindigkeiten konnten nicht übernommen werden.");
+      return;
+    }
+
+    versionOperationRef.current = true;
+    setVersionBusy(true);
+    try {
+      const scope = hasFeedSelection ? `${selectedPathIndices.length} ausgewählte Bahn${selectedPathIndices.length === 1 ? "" : "en"}` : "global";
+      const response = await fetch(`/api/projects/${encodeURIComponent(activeProject)}/versions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          gcode: { name: gcode.name, content },
+          dxfTransform: { rotationDegrees: rotation, origin },
+          label: `Geschwindigkeiten ${scope} geändert`,
+        }),
+      });
+      const project = await response.json() as LoadedProject & { error?: string };
+      if (!response.ok) throw new Error(project.error);
+      applyLoadedVersion(project);
+      setError(null);
+      await refreshProjects();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Geschwindigkeitsversion konnte nicht gespeichert werden.");
+    } finally {
+      versionOperationRef.current = false;
+      setVersionBusy(false);
+    }
+  }
+
   async function switchVersion(versionId: string) {
     if (!activeProject || versionOperationRef.current) return;
     versionOperationRef.current = true;
@@ -531,11 +588,13 @@ export default function Home() {
 
             {dxf ? <><Divider /><Box>
               <Typography variant="overline" color="text.secondary">DXF ausrichten</Typography>
-              <Stack direction="row" spacing={1} sx={{ alignItems: "center", mt: 1 }}>
-                <IconButton aria-label="90 Grad gegen den Uhrzeigersinn drehen" onClick={() => changeRotation(rotation - 90)}><Rotate90DegreesCcwRounded /></IconButton>
-                <Slider min={-180} max={180} step={1} value={Math.max(-180, Math.min(180, rotation))} onChange={(_, value) => changeRotation(value as number)} aria-label="DXF-Rotation" />
-                <IconButton aria-label="90 Grad im Uhrzeigersinn drehen" onClick={() => changeRotation(rotation + 90)}><Rotate90DegreesCwRounded /></IconButton>
-                <TextField label="°" type="number" size="small" value={rotation} onChange={(event) => changeRotation(Number(event.target.value) || 0)} slotProps={{ htmlInput: { step: 1 } }} sx={{ width: 78 }} />
+              <Stack spacing={1} sx={{ mt: 1 }}>
+                <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                  <IconButton aria-label="90 Grad gegen den Uhrzeigersinn drehen" onClick={() => changeRotation(rotation - 90)}><Rotate90DegreesCcwRounded /></IconButton>
+                  <Slider min={-180} max={180} step={1} value={Math.max(-180, Math.min(180, rotation))} onChange={(_, value) => changeRotation(value as number)} aria-label="DXF-Rotation" />
+                  <IconButton aria-label="90 Grad im Uhrzeigersinn drehen" onClick={() => changeRotation(rotation + 90)}><Rotate90DegreesCwRounded /></IconButton>
+                </Stack>
+                <TextField fullWidth label="Rotation (°)" type="number" size="small" value={rotation} onChange={(event) => changeRotation(Number(event.target.value) || 0)} slotProps={{ htmlInput: { step: 1 } }} />
               </Stack>
               <Button fullWidth sx={{ mt: 1.5 }} variant={selectingOrigin ? "contained" : "outlined"} color={selectingOrigin ? "warning" : "secondary"} startIcon={<MyLocationRounded />} disabled={!dxf.data.referencePoints.length} onClick={() => setSelectingOrigin((value) => !value)}>{selectingOrigin ? "Auswahl abbrechen" : "Nullpunkt auswählen"}</Button>
               {origin ? <Button fullWidth sx={{ mt: 0.5 }} color="inherit" startIcon={<RestartAltRounded />} onClick={() => { changeOrigin(null); setSelectingOrigin(false); }}>Nullpunkt zurücksetzen</Button> : null}
@@ -564,6 +623,46 @@ export default function Home() {
               >
                 Ausgewählten G-Code herunterladen
               </Button>
+            </Box>
+
+            <Divider />
+            <Box>
+              <Typography variant="overline" color="text.secondary">Geschwindigkeiten</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, mb: 1.25 }}>
+                {hasFeedSelection ? `${selectedPathIndices.length} Bahn${selectedPathIndices.length === 1 ? "" : "en"} ausgewählt – gespeichert wird nur die Auswahl.` : "Keine Bahn ausgewählt – Änderungen gelten global."}
+              </Typography>
+              <Stack spacing={1.25}>
+                <TextField
+                  label="Vorschubgeschwindigkeit (mm/min)"
+                  type="number"
+                  size="small"
+                  value={cuttingFeedDraft}
+                  disabled={!cuttingFeedEditable || versionBusy}
+                  helperText={hasFeedSelection && !feedAnalysis?.hasSelectedCutting ? "Auswahl enthält keine XY-Vorschubbahn." : feedAnalysis?.hasSelectedCutting ? "Wirksamer Wert der Auswahl" : "Global aus G-Code erkannt"}
+                  onChange={(event) => setFeedDraft({ key: feedContextKey, cutting: Number(event.target.value), plunge: plungeFeedDraft })}
+                  slotProps={{ htmlInput: { min: 1, step: 10 } }}
+                  fullWidth
+                />
+                <TextField
+                  label="Eintauchgeschwindigkeit (mm/min)"
+                  type="number"
+                  size="small"
+                  value={plungeFeedDraft}
+                  disabled={!plungeFeedEditable || versionBusy}
+                  helperText={hasFeedSelection && !feedAnalysis?.hasSelectedPlunge ? "Auswahl enthält keine abwärts gerichtete Z-/Rampenzustellung." : feedAnalysis?.hasSelectedPlunge ? "Wirksamer Wert der Auswahl" : "Global aus G-Code erkannt"}
+                  onChange={(event) => setFeedDraft({ key: feedContextKey, cutting: cuttingFeedDraft, plunge: Number(event.target.value) })}
+                  slotProps={{ htmlInput: { min: 1, step: 10 } }}
+                  fullWidth
+                />
+                <Button
+                  variant="contained"
+                  startIcon={<SaveRounded />}
+                  disabled={versionBusy || (!cuttingFeedDirty && !plungeFeedDirty) || (cuttingFeedDirty && cuttingFeedDraft <= 0) || (plungeFeedDirty && plungeFeedDraft <= 0)}
+                  onClick={() => void saveFeedChanges()}
+                >
+                  Als neue Version speichern
+                </Button>
+              </Stack>
             </Box>
           </Stack>
         )}

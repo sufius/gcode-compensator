@@ -35,6 +35,21 @@ export type PocketPassResult = {
   summary: PocketPassSummary;
 };
 
+export type GCodeFeedAnalysis = {
+  globalCuttingFeed: number | null;
+  globalPlungeFeed: number | null;
+  selectedCuttingFeed: number | null;
+  selectedPlungeFeed: number | null;
+  hasSelectedCutting: boolean;
+  hasSelectedPlunge: boolean;
+};
+
+export type GCodeFeedUpdate = {
+  cuttingFeed?: number;
+  plungeFeed?: number;
+  selectedPathIndices?: number[];
+};
+
 type Motion = 0 | 1 | 2 | 3;
 
 const WORD = /([A-Z])\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+))/gi;
@@ -72,6 +87,7 @@ export function parseGCode(source: string): GCodeResult {
   let absolute = true;
   let scale = 1;
   let motion: Motion = 0;
+  let feed: number | null = null;
   let parsedLines = 0;
 
   const sourceLines = source.split(/\r?\n/);
@@ -94,6 +110,7 @@ export function parseGCode(source: string): GCodeResult {
     }
 
     const isArcWithCenter = (motion === 2 || motion === 3) && (words.has("I") || words.has("J"));
+    if (words.has("F")) feed = words.get("F")! * scale;
     const targetZ = words.has("Z") ? (absolute ? words.get("Z")! * scale : positionZ + words.get("Z")! * scale) : positionZ;
     if (!words.has("X") && !words.has("Y") && !isArcWithCenter) {
       positionZ = targetZ;
@@ -123,10 +140,10 @@ export function parseGCode(source: string): GCodeResult {
         );
         points[0] = position;
         points[points.length - 1] = target;
-        paths.push({ points, gcode: { lineIndex, absolute, unitScale: scale, startZ: positionZ, endZ: targetZ, hasExplicitZ: words.has("Z") } });
-      } else paths.push({ points: [position, target], gcode: { lineIndex, absolute, unitScale: scale, startZ: positionZ, endZ: targetZ, hasExplicitZ: words.has("Z") } });
+        paths.push({ points, gcode: { lineIndex, absolute, unitScale: scale, startZ: positionZ, endZ: targetZ, hasExplicitZ: words.has("Z"), feed } });
+      } else paths.push({ points: [position, target], gcode: { lineIndex, absolute, unitScale: scale, startZ: positionZ, endZ: targetZ, hasExplicitZ: words.has("Z"), feed } });
     } else {
-      paths.push({ points: [position, target], rapid: motion === 0, gcode: { lineIndex, absolute, unitScale: scale, startZ: positionZ, endZ: targetZ, hasExplicitZ: words.has("Z") } });
+      paths.push({ points: [position, target], rapid: motion === 0, gcode: { lineIndex, absolute, unitScale: scale, startZ: positionZ, endZ: targetZ, hasExplicitZ: words.has("Z"), feed } });
     }
     position = target;
     positionZ = targetZ;
@@ -232,6 +249,14 @@ function replaceFeed(line: string, feed: number) {
     : line;
 }
 
+function setFeed(line: string, feed: number) {
+  if (/F\s*[+-]?(?:\d+(?:\.\d*)?|\.\d+)/i.test(line)) return replaceFeed(line, feed);
+  const commentIndex = line.indexOf(";");
+  return commentIndex >= 0
+    ? `${line.slice(0, commentIndex).trimEnd()} F${formatCoordinate(feed)} ${line.slice(commentIndex)}`
+    : `${line.trimEnd()} F${formatCoordinate(feed)}`;
+}
+
 function findPocketLineRange(lines: string[], result: GCodeResult, selectedPathIndices: number[]) {
   const selectedPaths = selectedPathIndices
     .map((index) => result.paths[index])
@@ -259,7 +284,16 @@ function findPocketLineRange(lines: string[], result: GCodeResult, selectedPathI
   return { startLine, endLine, firstSelectedLine, lastSelectedLine };
 }
 
-type LineState = { absolute: boolean; scale: number; motion: Motion; startZ: number; endZ: number; words: Map<string, number> };
+type LineState = {
+  absolute: boolean;
+  scale: number;
+  motion: Motion;
+  startZ: number;
+  endZ: number;
+  startFeed: number | null;
+  endFeed: number | null;
+  words: Map<string, number>;
+};
 
 function getLineStates(lines: string[]) {
   const states: LineState[] = [];
@@ -267,6 +301,7 @@ function getLineStates(lines: string[]) {
   let scale = 1;
   let motion: Motion = 0;
   let z = 0;
+  let feed: number | null = null;
   lines.forEach((line) => {
     const words = wordsInLine(line);
     const codes = [...lineWithoutComments(line).matchAll(/G\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+))/gi)].map((match) => Number(match[1]));
@@ -278,10 +313,117 @@ function getLineStates(lines: string[]) {
       else if ([0, 1, 2, 3].includes(code)) motion = code as Motion;
     }
     const endZ = words.has("Z") ? (absolute ? words.get("Z")! * scale : z + words.get("Z")! * scale) : z;
-    states.push({ absolute, scale, motion, startZ: z, endZ, words });
+    const endFeed = words.has("F") ? words.get("F")! * scale : feed;
+    states.push({ absolute, scale, motion, startZ: z, endZ, startFeed: feed, endFeed, words });
     z = endZ;
+    feed = endFeed;
   });
   return states;
+}
+
+type FeedCategory = "cutting" | "plunge";
+
+function feedCategory(state: LineState, path?: Path): FeedCategory | null {
+  if (state.motion === 0) return null;
+  if (state.endZ < state.startZ - 1e-7) return "plunge";
+  if (!path || path.rapid || path.points.length < 2) return null;
+  const distance = path.points.slice(1).reduce((sum, point, index) => {
+    const previous = path.points[index];
+    return sum + Math.hypot(point.x - previous.x, point.y - previous.y);
+  }, 0);
+  return distance > 1e-7 ? "cutting" : null;
+}
+
+function mostCommonFeed(feeds: number[]) {
+  if (!feeds.length) return null;
+  const counts = new Map<string, { value: number; count: number }>();
+  feeds.forEach((feed) => {
+    const key = feed.toFixed(6);
+    const item = counts.get(key) ?? { value: feed, count: 0 };
+    item.count += 1;
+    counts.set(key, item);
+  });
+  return [...counts.values()].sort((a, b) => b.count - a.count)[0].value;
+}
+
+export function analyzeGCodeFeeds(source: string, result: GCodeResult, selectedPathIndices: number[] = []): GCodeFeedAnalysis {
+  const lines = source.split(/\r?\n/);
+  const states = getLineStates(lines);
+  const pathsByLine = new Map(result.paths.filter((path) => path.gcode).map((path) => [path.gcode!.lineIndex, path]));
+  const cuttingFeeds: number[] = [];
+  const plungeFeeds: number[] = [];
+  states.forEach((state, lineIndex) => {
+    if (state.endFeed === null) return;
+    const category = feedCategory(state, pathsByLine.get(lineIndex));
+    if (category === "cutting") cuttingFeeds.push(state.endFeed);
+    else if (category === "plunge") plungeFeeds.push(state.endFeed);
+  });
+
+  const selectedCuttingFeeds: number[] = [];
+  const selectedPlungeFeeds: number[] = [];
+  selectedPathIndices.forEach((index) => {
+    const path = result.paths[index];
+    if (!path?.gcode || path.rapid) return;
+    const state = states[path.gcode.lineIndex];
+    if (!state || state.endFeed === null) return;
+    const category = feedCategory(state, path);
+    if (category === "cutting") selectedCuttingFeeds.push(state.endFeed);
+    else if (category === "plunge") selectedPlungeFeeds.push(state.endFeed);
+  });
+
+  return {
+    globalCuttingFeed: mostCommonFeed(cuttingFeeds),
+    globalPlungeFeed: mostCommonFeed(plungeFeeds),
+    selectedCuttingFeed: mostCommonFeed(selectedCuttingFeeds),
+    selectedPlungeFeed: mostCommonFeed(selectedPlungeFeeds),
+    hasSelectedCutting: selectedCuttingFeeds.length > 0,
+    hasSelectedPlunge: selectedPlungeFeeds.length > 0,
+  };
+}
+
+export function updateGCodeFeeds(source: string, result: GCodeResult, update: GCodeFeedUpdate) {
+  if (update.cuttingFeed !== undefined && (!Number.isFinite(update.cuttingFeed) || update.cuttingFeed <= 0)) throw new Error("Die Vorschubgeschwindigkeit muss größer als 0 mm/min sein.");
+  if (update.plungeFeed !== undefined && (!Number.isFinite(update.plungeFeed) || update.plungeFeed <= 0)) throw new Error("Die Eintauchgeschwindigkeit muss größer als 0 mm/min sein.");
+  if (update.cuttingFeed === undefined && update.plungeFeed === undefined) return source;
+
+  const lines = source.split(/\r?\n/);
+  const states = getLineStates(lines);
+  const pathsByLine = new Map(result.paths.filter((path) => path.gcode).map((path) => [path.gcode!.lineIndex, path]));
+  const selectedLines = new Set((update.selectedPathIndices ?? []).flatMap((index) => {
+    const lineIndex = result.paths[index]?.gcode?.lineIndex;
+    return lineIndex === undefined ? [] : [lineIndex];
+  }));
+
+  if (selectedLines.size) {
+    const output: string[] = [];
+    lines.forEach((line, lineIndex) => {
+      const state = states[lineIndex];
+      const category = feedCategory(state, pathsByLine.get(lineIndex));
+      const desired = category === "cutting" ? update.cuttingFeed : category === "plunge" ? update.plungeFeed : undefined;
+      if (!selectedLines.has(lineIndex) || desired === undefined) {
+        output.push(line);
+        return;
+      }
+      if (state.endFeed === null) throw new Error("Für die ausgewählte Bahn wurde kein wirksamer ursprünglicher Vorschub gefunden.");
+      output.push(setFeed(line, desired / state.scale));
+      output.push(`F${formatCoordinate(state.endFeed / state.scale)} ; ursprünglichen Vorschub nach ausgewählter Bahn wiederherstellen`);
+    });
+    return output.join("\n");
+  }
+
+  let outputFeed: number | null = null;
+  return lines.map((line, lineIndex) => {
+    const state = states[lineIndex];
+    const category = feedCategory(state, pathsByLine.get(lineIndex));
+    const requested = category === "cutting" ? update.cuttingFeed : category === "plunge" ? update.plungeFeed : undefined;
+    const desired = requested ?? (category ? state.endFeed : null);
+    if (category && desired !== null && (outputFeed === null || Math.abs(outputFeed - desired) > 1e-7 || state.words.has("F"))) {
+      outputFeed = desired;
+      return setFeed(line, desired / state.scale);
+    }
+    if (state.words.has("F")) outputFeed = state.endFeed;
+    return line;
+  }).join("\n");
 }
 
 function transformPocketPoint(point: Point, center: Point, scaleX: number, scaleY: number): Point {

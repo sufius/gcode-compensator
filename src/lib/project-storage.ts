@@ -124,7 +124,11 @@ export async function saveProject(slug: string, request: SaveProjectRequest): Pr
     updatedAt: new Date().toISOString(),
   };
   if (current?.versions?.length) {
-    manifest.versions = current.versions;
+    manifest.versions = current.versions.map((version) =>
+      request.dxfTransform && version.id === current.currentVersion
+        ? { ...version, dxfTransform: manifest.dxfTransform }
+        : version,
+    );
     manifest.currentVersion = current.currentVersion;
   } else if (files.gcode) {
     const initialVersion: ProjectVersion = {

@@ -2,8 +2,16 @@
   "schemaVersion": 1,
   "name": "quran_board_6.1.0",
   "files": {
-    "dxf": null,
-    "gcode": null
+    "dxf": {
+      "path": "inputs/contour.dxf",
+      "originalName": "Skizze48.dxf",
+      "sha256": "264acd25039dc4855c9b8facd5830cd77d78dfd2fe75459e52af70cd7906a78d"
+    },
+    "gcode": {
+      "path": "inputs/toolpath.gcode",
+      "originalName": "Skizze48_compensated.gcode",
+      "sha256": "913e3f78c2d39401aeb2663ab3b8904ecc5a460b4a856cc716eda710b05a6214"
+    }
   },
   "dxfTransform": {
     "rotationDegrees": 0,
@@ -16,7 +24,7 @@
     "showGrid": true,
     "showRapidMoves": true
   },
-  "updatedAt": "2026-08-27T15:06:39.998Z",
+  "updatedAt": "2026-09-19T08:09:41.084Z",
   "versions": [
     {
       "id": "v1",

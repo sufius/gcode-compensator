@@ -76,6 +76,7 @@ export default function Home() {
   const [pocketPreview, setPocketPreview] = useState<PocketPassResult | null>(null);
   const [feedDraft, setFeedDraft] = useState({ key: "", cutting: 0, plunge: 0 });
   const versionOperationRef = useRef(false);
+  const pendingInputs = useRef<NonNullable<SaveProjectRequest["files"]>>({});
 
   const handlePathSelectionChange = useCallback((indices: number[]) => {
     setSelectedPathIndices((current) => current.length === indices.length && current.every((value, index) => value === indices[index]) ? current : indices);
@@ -137,7 +138,7 @@ export default function Home() {
       });
       const result = await response.json() as { error?: string };
       if (!response.ok) throw new Error(result.error);
-      setSaveState("saved");
+      setSaveState(Object.keys(pendingInputs.current).length ? "dirty" : "saved");
       void refreshProjects();
     } catch (reason) {
       setSaveState("dirty");
@@ -172,6 +173,7 @@ export default function Home() {
       const loadedGcode = project.contents.gcode && project.manifest.files.gcode
         ? { name: project.manifest.files.gcode.originalName, content: project.contents.gcode, data: parseGCode(project.contents.gcode) }
         : null;
+      pendingInputs.current = {};
       setDxf(loadedDxf);
       setGcode(loadedGcode);
       setRotation(project.manifest.dxfTransform.rotationDegrees);
@@ -203,10 +205,11 @@ export default function Home() {
       return;
     }
     setSaveState("saving");
+    const uploads = pendingInputs.current;
     try {
       const body: SaveProjectRequest = {
         name: projectName,
-        files: activeProject ? undefined : {
+        files: activeProject ? uploads : {
           dxf: dxf ? { name: dxf.name, content: dxf.content } : null,
           gcode: gcode ? { name: gcode.name, content: gcode.content } : null,
         },
@@ -219,11 +222,12 @@ export default function Home() {
       });
       const result = await response.json() as { slug?: string; manifest?: { versions?: ProjectVersion[]; currentVersion?: string }; error?: string };
       if (!response.ok || !result.slug) throw new Error(result.error ?? "Projekt konnte nicht gespeichert werden.");
+      if (pendingInputs.current === uploads) pendingInputs.current = {};
       setActiveProject(result.slug);
       rememberProject(result.slug);
       setVersions(result.manifest?.versions ?? versions);
       setCurrentVersion(result.manifest?.currentVersion ?? currentVersion);
-      setSaveState("saved");
+      setSaveState(Object.keys(pendingInputs.current).length ? "dirty" : "saved");
       setError(null);
       await refreshProjects();
     } catch (reason) {
@@ -245,7 +249,7 @@ export default function Home() {
       if (!response.ok) throw new Error(result.error);
       setProjectName(projectNameDraft.trim());
       setEditProjectOpen(false);
-      setSaveState("saved");
+      setSaveState(Object.keys(pendingInputs.current).length ? "dirty" : "saved");
       setError(null);
       await refreshProjects();
     } catch (reason) {
@@ -294,7 +298,7 @@ export default function Home() {
     setCurrentVersion(project.manifest.currentVersion ?? "");
     setSelectedPathIndices([]);
     setSelectedNodes([]);
-    setSaveState("saved");
+    setSaveState(Object.keys(pendingInputs.current).length ? "dirty" : "saved");
   }
 
   async function commitOffset(direction: OffsetDirection, rawValue: number) {
@@ -498,6 +502,7 @@ export default function Home() {
 
   async function loadDxf(file: File) {
     await loadFile(file, parseDxf, (value) => {
+      pendingInputs.current = { ...pendingInputs.current, dxf: { name: value.name, content: value.content } };
       setDxf(value);
       setRotation(0);
       setOrigin(null);
@@ -505,7 +510,15 @@ export default function Home() {
     });
   }
 
+  async function loadGcode(file: File) {
+    await loadFile(file, parseGCode, (value) => {
+      pendingInputs.current = { ...pendingInputs.current, gcode: { name: value.name, content: value.content } };
+      setGcode(value);
+    });
+  }
+
   function clearView() {
+    pendingInputs.current = {};
     setDxf(null);
     setGcode(null);
     setError(null);
@@ -581,7 +594,7 @@ export default function Home() {
               <Typography variant="overline" color="text.secondary">Dateien</Typography>
               <Stack spacing={1.25} sx={{ mt: 1 }}>
                 <FileDropzone title="DXF-Kontur" description=".dxf auswählen" accept=".dxf,application/dxf" fileName={dxf?.name} accent="#55d6be" onFile={loadDxf} />
-                <FileDropzone title="G-Code" description=".nc, .gcode, .tap oder .cnc" accept=".nc,.gcode,.tap,.cnc,.ngc,text/plain" fileName={gcode?.name} accent="#ffb454" onFile={(file) => loadFile(file, parseGCode, setGcode)} />
+                <FileDropzone title="G-Code" description=".nc, .gcode, .tap oder .cnc" accept=".nc,.gcode,.tap,.cnc,.ngc,text/plain" fileName={gcode?.name} accent="#ffb454" onFile={loadGcode} />
               </Stack>
               {(dxf || gcode) ? <Button sx={{ mt: 1 }} size="small" startIcon={<DeleteOutlineRounded />} color="inherit" onClick={clearView}>Ansicht leeren</Button> : null}
             </Box>

@@ -5,6 +5,7 @@ import AddRounded from "@mui/icons-material/AddRounded";
 import RemoveRounded from "@mui/icons-material/RemoveRounded";
 import { Box, IconButton, Stack, Typography } from "@mui/material";
 import { Bounds, combineBounds, getBounds, Path, Point } from "@/lib/geometry";
+import { SelectedSegment, toggleOverlappingSegment } from "@/lib/segment-selection";
 
 const WIDTH = 1000;
 const HEIGHT = 620;
@@ -14,7 +15,6 @@ const MAX_ZOOM = 16;
 
 type Viewport = { zoom: number; panX: number; panY: number };
 type ScreenBox = { minX: number; minY: number; maxX: number; maxY: number };
-type SelectedSegment = { pathIndex: number; segmentIndex: number };
 
 function niceStep(range: number) {
   const rough = Math.max(range, 1e-6) / 8;
@@ -123,7 +123,6 @@ export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], sel
   const [selectionBox, setSelectionBox] = useState<ScreenBox | null>(null);
   const [selection, setSelection] = useState<{ paths: Path[]; segments: SelectedSegment[] } | null>(null);
   const [nodeSelection, setNodeSelection] = useState<{ paths: Path[]; keys: string[] } | null>(null);
-  const [hoveredSegment, setHoveredSegment] = useState<{ paths: Path[]; segment: SelectedSegment } | null>(null);
   const [viewport, setViewport] = useState<Viewport>({ zoom: 1, panX: 0, panY: 0 });
 
   const scene = useMemo(() => {
@@ -333,7 +332,6 @@ export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], sel
   }, [drawingSelection, gcodeNodes, gcodePaths, nodeMode, scene, svgPoint]);
 
   const selectedSegments = selection?.paths === gcodePaths ? selection.segments : [];
-  const activeHoveredSegment = hoveredSegment?.paths === gcodePaths ? hoveredSegment.segment : null;
   const selectedNodeKeys = nodeSelection?.paths === gcodePaths ? nodeSelection.keys : [];
   const selectedPathSignature = [...new Set(selectedSegments.map((segment) => segment.pathIndex))].sort((a, b) => a - b).join(",");
 
@@ -354,11 +352,7 @@ export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], sel
   function toggleSegmentSelection(segment: SelectedSegment) {
     setSelection((currentSelection) => ({
       paths: gcodePaths,
-      segments: currentSelection?.paths === gcodePaths
-        ? currentSelection.segments.some((current) => current.pathIndex === segment.pathIndex && current.segmentIndex === segment.segmentIndex)
-          ? currentSelection.segments.filter((current) => current.pathIndex !== segment.pathIndex || current.segmentIndex !== segment.segmentIndex)
-          : mergeSelectedSegments(currentSelection.segments, [segment])
-        : [segment],
+      segments: toggleOverlappingSegment(gcodePaths, currentSelection?.paths === gcodePaths ? currentSelection.segments : [], segment),
     }));
   }
 
@@ -416,12 +410,6 @@ export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], sel
           const d = pathData({ points: [path.points[segmentIndex], path.points[segmentIndex + 1]] }, scene.project);
           return <path key={`selected-${pathIndex}-${segmentIndex}`} d={d} fill="none" stroke="#ff4fd8" strokeWidth={5} vectorEffect="non-scaling-stroke" strokeLinecap="round" />;
         }) : null}
-        {!nodeMode && activeHoveredSegment ? (() => {
-          const path = gcodePaths[activeHoveredSegment.pathIndex];
-          if (!path?.points[activeHoveredSegment.segmentIndex + 1]) return null;
-          const d = pathData({ points: [path.points[activeHoveredSegment.segmentIndex], path.points[activeHoveredSegment.segmentIndex + 1]] }, scene.project);
-          return <path d={d} fill="none" stroke="#fff3c4" strokeWidth={7} strokeOpacity={0.9} vectorEffect="non-scaling-stroke" strokeLinecap="round" pointerEvents="none" />;
-        })() : null}
         {!nodeMode ? gcodePaths.map((path, pathIndex) => path.rapid ? null : path.points.slice(0, -1).map((point, segmentIndex) => {
           const segment = { pathIndex, segmentIndex };
           const d = pathData({ points: [point, path.points[segmentIndex + 1]] }, scene.project);
@@ -434,11 +422,10 @@ export function ToolpathViewer({ dxfPaths, gcodePaths, referencePoints = [], sel
             vectorEffect="non-scaling-stroke"
             pointerEvents="stroke"
             cursor="pointer"
-            onMouseEnter={() => setHoveredSegment({ paths: gcodePaths, segment })}
-            onMouseLeave={() => setHoveredSegment((current) => current?.paths === gcodePaths && current.segment.pathIndex === pathIndex && current.segment.segmentIndex === segmentIndex ? null : current)}
             onMouseDown={(event) => {
-              if (!event.ctrlKey && !event.shiftKey) return;
+              if (event.button !== 0 || selectingOrigin || (!event.ctrlKey && !event.shiftKey)) return;
               event.preventDefault();
+              event.stopPropagation();
               toggleSegmentSelection(segment);
             }}
           />;

@@ -24,7 +24,7 @@
     "showGrid": true,
     "showRapidMoves": true
   },
-  "updatedAt": "2026-09-19T08:09:41.084Z",
+  "updatedAt": "2026-09-19T11:21:11.090Z",
   "versions": [
     {
       "id": "v1",
@@ -67,7 +67,21 @@
           "y": -2.365
         }
       }
+    },
+    {
+      "id": "v4",
+      "createdAt": "2026-09-19T11:21:10.260Z",
+      "label": "Bewegung verschoben: Y -2 mm",
+      "gcodePath": "versions/v4/toolpath.gcode",
+      "gcodeSha256": "b37946b8df09b47ff712c1c386375925f6857f5a4723597a5b5f9c715cf301b4",
+      "dxfTransform": {
+        "rotationDegrees": 0,
+        "origin": {
+          "x": -2.365,
+          "y": -2.365
+        }
+      }
     }
   ],
-  "currentVersion": "v3"
+  "currentVersion": "v4"
 }
